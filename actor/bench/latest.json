@@ -1,0 +1,2728 @@
+{
+ "ts": "2026-10-09T18:40:43.750Z",
+ "commit": "a258b3b+",
+ "scenario_count": 81,
+ "scenario_hash": "6578e43c",
+ "score": 79.0,
+ "violations": 79,
+ "parts": {
+  "decisions": 0.8539,
+  "robustness": 0.3103,
+  "receipts": 1.0,
+  "lifecycle": 0.8667,
+  "mutants": 1.0
+ },
+ "mutants": {
+  "caught": 8,
+  "total": 8,
+  "missed": []
+ },
+ "speed_ms": 16.7,
+ "scenarios": [
+  {
+   "id": "full-ladder",
+   "group": "act",
+   "title": "Confident, confirmed phishing on a small host",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 61.411600006977096
+  },
+  {
+   "id": "boundary-protect",
+   "group": "act",
+   "title": "Confidence exactly 0.80 publishes to the feed and nothing more",
+   "status": "pass",
+   "expected": {
+    "feed": 1
+   },
+   "executed": {
+    "feed": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "withheld",
+    "netcraft": "withheld",
+    "abuseipdb": "withheld",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 1,
+   "receipts_ok": 1,
+   "latency_ms": 11.266599991358817
+  },
+  {
+   "id": "boundary-report",
+   "group": "act",
+   "title": "Confidence exactly 0.90 reaches the reporting platforms",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 4,
+   "receipts_ok": 4,
+   "latency_ms": 17.174699998577125
+  },
+  {
+   "id": "boundary-notify",
+   "group": "act",
+   "title": "Confidence exactly 0.95 notifies the host",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 11.679300005198456
+  },
+  {
+   "id": "just-below-notify",
+   "group": "act",
+   "title": "Confidence 0.949 stops short of mailing the host",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 4,
+   "receipts_ok": 4,
+   "latency_ms": 10.492200002772734
+  },
+  {
+   "id": "uncorroborated",
+   "group": "act",
+   "title": "Very confident but no second source, so the host is not mailed",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 4,
+   "receipts_ok": 4,
+   "latency_ms": 16.200499987462536
+  },
+  {
+   "id": "malware-type",
+   "group": "act",
+   "title": "Malware instead of phishing",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 20.239300007233396
+  },
+  {
+   "id": "ip-literal-target",
+   "group": "act",
+   "title": "Payload served from a bare public IP address",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 18.43110000481829
+  },
+  {
+   "id": "port-and-query",
+   "group": "act",
+   "title": "URL with a port, a path and a query string",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 11.645599995972589
+  },
+  {
+   "id": "uppercase-host",
+   "group": "act",
+   "title": "Host and scheme in capitals are normalised",
+   "status": "unsafe",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [
+    "live link in a page or mail meant for people"
+   ],
+   "violations": 1,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 13.078300005872734
+  },
+  {
+   "id": "punycode-host",
+   "group": "act",
+   "title": "Internationalised lookalike domain in punycode",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 17.308299997239374
+  },
+  {
+   "id": "trailing-dot-host",
+   "group": "act",
+   "title": "Fully qualified host with a trailing dot is listed without it",
+   "status": "fail",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [
+    "blocklist should contain trailing-dot-host.bad.example",
+    "blocklist must not contain trailing-dot-host.bad.example."
+   ],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 13.048299995716661
+  },
+  {
+   "id": "no-abuse-contact",
+   "group": "act",
+   "title": "Host has no published abuse contact",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 4,
+   "receipts_ok": 4,
+   "latency_ms": 16.228899999987334
+  },
+  {
+   "id": "unresolvable",
+   "group": "act",
+   "title": "Domain does not resolve any more",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "withheld",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 3,
+   "receipts_ok": 3,
+   "latency_ms": 5.9695999952964485
+  },
+  {
+   "id": "cdn-fronted",
+   "group": "act",
+   "title": "Site sits behind a CDN, whose IP must not be reported",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "notify_host": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "withheld",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 4,
+   "receipts_ok": 4,
+   "latency_ms": 10.013799997977912
+  },
+  {
+   "id": "lookalike-prefix",
+   "group": "act",
+   "title": "google.com.evil.example is not Google and gets the full ladder",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 15.288300011889078
+  },
+  {
+   "id": "lookalike-suffix",
+   "group": "act",
+   "title": "notallowed.example must not ride on the allowlist entry allowed.example",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 9.290899994084612
+  },
+  {
+   "id": "userinfo-trick",
+   "group": "act",
+   "title": "google.com@ in front of the real host does not make it Google",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 10.290299993357621
+  },
+  {
+   "id": "text-true-detection",
+   "group": "act",
+   "title": "Detection flag arrives as the text \"true\"",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 19.443800003500655
+  },
+  {
+   "id": "text-confidence",
+   "group": "act",
+   "title": "Confidence arrives as the text \"0.96\"",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 15.654300004825927
+  },
+  {
+   "id": "extra-fields",
+   "group": "act",
+   "title": "Unknown extra fields are ignored",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 16.156500001670793
+  },
+  {
+   "id": "below-threshold",
+   "group": "withhold",
+   "title": "Confidence 0.62 does nothing",
+   "status": "pass",
+   "expected": {},
+   "executed": {},
+   "cells": {
+    "feed": "withheld",
+    "urlscan": "withheld",
+    "netcraft": "withheld",
+    "abuseipdb": "withheld",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 0,
+   "receipts_ok": 0,
+   "latency_ms": 0.9384000004502013
+  },
+  {
+   "id": "just-below-protect",
+   "group": "withhold",
+   "title": "Confidence 0.799 does nothing",
+   "status": "pass",
+   "expected": {},
+   "executed": {},
+   "cells": {
+    "feed": "withheld",
+    "urlscan": "withheld",
+    "netcraft": "withheld",
+    "abuseipdb": "withheld",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 0,
+   "receipts_ok": 0,
+   "latency_ms": 0.7029999978840351
+  },
+  {
+   "id": "zero-confidence",
+   "group": "withhold",
+   "title": "Flagged but with zero confidence",
+   "status": "pass",
+   "expected": {},
+   "executed": {},
+   "cells": {
+    "feed": "withheld",
+    "urlscan": "withheld",
+    "netcraft": "withheld",
+    "abuseipdb": "withheld",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 0,
+   "receipts_ok": 0,
+   "latency_ms": 0.680500001180917
+  },
+  {
+   "id": "not-detected",
+   "group": "withhold",
+   "title": "Not a detection, whatever the confidence says",
+   "status": "pass",
+   "expected": {},
+   "executed": {},
+   "cells": {
+    "feed": "withheld",
+    "urlscan": "withheld",
+    "netcraft": "withheld",
+    "abuseipdb": "withheld",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 0,
+   "receipts_ok": 0,
+   "latency_ms": 0.687299994751811
+  },
+  {
+   "id": "simulated",
+   "group": "withhold",
+   "title": "Fixture data is never sent",
+   "status": "pass",
+   "expected": {},
+   "executed": {},
+   "cells": {
+    "feed": "withheld",
+    "urlscan": "withheld",
+    "netcraft": "withheld",
+    "abuseipdb": "withheld",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 0,
+   "receipts_ok": 0,
+   "latency_ms": 3.4958000032929704
+  },
+  {
+   "id": "kill-switch",
+   "group": "withhold",
+   "title": "The kill switch stops everything",
+   "status": "pass",
+   "expected": {},
+   "executed": {},
+   "cells": {
+    "feed": "withheld",
+    "urlscan": "withheld",
+    "netcraft": "withheld",
+    "abuseipdb": "withheld",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 0,
+   "receipts_ok": 0,
+   "latency_ms": 2.5213000044459477
+  },
+  {
+   "id": "allowlisted-platform",
+   "group": "withhold",
+   "title": "Bad page on Google Sites is reported per URL, the domain is never blocked",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "withheld",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 3,
+   "receipts_ok": 3,
+   "latency_ms": 6.45020000229124
+  },
+  {
+   "id": "allowlisted-subdomain",
+   "group": "withhold",
+   "title": "Subdomain of an allowlisted domain is covered by it",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "withheld",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 3,
+   "receipts_ok": 3,
+   "latency_ms": 8.929299990995787
+  },
+  {
+   "id": "allowlisted-trailing-dot",
+   "group": "withhold",
+   "title": "github.com with a trailing dot is still GitHub",
+   "status": "unsafe",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "forbidden",
+    "notify_host": "forbidden",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [
+    "abuseipdb went out 1x, allowed 0x",
+    "notify_host went out 1x, allowed 0x",
+    "blocklist must not contain github.com."
+   ],
+   "violations": 2,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 10.811100000864826
+  },
+  {
+   "id": "allowlisted-uppercase",
+   "group": "withhold",
+   "title": "GitHub.com in mixed case is still GitHub",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "withheld",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 3,
+   "receipts_ok": 3,
+   "latency_ms": 10.207200000877492
+  },
+  {
+   "id": "shared-network",
+   "group": "withhold",
+   "title": "IP on a shared network is never reported to an IP reputation list",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "notify_host": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "withheld",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 4,
+   "receipts_ok": 4,
+   "latency_ms": 20.766800007550046
+  },
+  {
+   "id": "private-ip-resolution",
+   "group": "withhold",
+   "title": "Domain resolves to a private address, which is never reported",
+   "status": "unsafe",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "forbidden",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [
+    "abuseipdb went out 1x, allowed 0x"
+   ],
+   "violations": 1,
+   "crashed": false,
+   "receipts_total": 4,
+   "receipts_ok": 4,
+   "latency_ms": 12.864199990872294
+  },
+  {
+   "id": "loopback-resolution",
+   "group": "withhold",
+   "title": "Domain resolves to 127.0.0.1, which is never reported",
+   "status": "unsafe",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "forbidden",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [
+    "abuseipdb went out 1x, allowed 0x"
+   ],
+   "violations": 1,
+   "crashed": false,
+   "receipts_total": 4,
+   "receipts_ok": 4,
+   "latency_ms": 11.869999987538904
+  },
+  {
+   "id": "private-ip-target",
+   "group": "withhold",
+   "title": "Target is itself a private address and is refused outright",
+   "status": "unsafe",
+   "expected": {},
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1
+   },
+   "cells": {
+    "feed": "forbidden",
+    "urlscan": "forbidden",
+    "netcraft": "forbidden",
+    "abuseipdb": "forbidden",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [
+    "feed went out 1x, allowed 0x",
+    "urlscan went out 1x, allowed 0x",
+    "netcraft went out 1x, allowed 0x",
+    "abuseipdb went out 1x, allowed 0x"
+   ],
+   "violations": 4,
+   "crashed": false,
+   "receipts_total": 4,
+   "receipts_ok": 4,
+   "latency_ms": 18.531499998061918
+  },
+  {
+   "id": "controlled-target",
+   "group": "withhold",
+   "title": "The team's own test page only reaches the mock registrar and the mail sink",
+   "status": "pass",
+   "expected": {
+    "notify_host": 1,
+    "mock_registrar": 1
+   },
+   "executed": {
+    "notify_host": 1,
+    "mock_registrar": 1
+   },
+   "cells": {
+    "feed": "withheld",
+    "urlscan": "withheld",
+    "netcraft": "withheld",
+    "abuseipdb": "withheld",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "acted",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 2,
+   "receipts_ok": 2,
+   "latency_ms": 7.087100006174296
+  },
+  {
+   "id": "localhost-without-flag",
+   "group": "withhold",
+   "title": "A localhost target is treated as the team's own even without the flag",
+   "status": "pass",
+   "expected": {
+    "notify_host": 1,
+    "mock_registrar": 1
+   },
+   "executed": {
+    "notify_host": 1,
+    "mock_registrar": 1
+   },
+   "cells": {
+    "feed": "withheld",
+    "urlscan": "withheld",
+    "netcraft": "withheld",
+    "abuseipdb": "withheld",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "acted",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 2,
+   "receipts_ok": 2,
+   "latency_ms": 6.280400004470721
+  },
+  {
+   "id": "path-traversal-id",
+   "group": "hostile",
+   "title": "event_id tries to climb out of the feed folder",
+   "status": "unsafe",
+   "expected": {},
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "forbidden",
+    "urlscan": "forbidden",
+    "netcraft": "forbidden",
+    "abuseipdb": "forbidden",
+    "notify_host": "forbidden",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [
+    "feed went out 1x, allowed 0x",
+    "urlscan went out 1x, allowed 0x",
+    "netcraft went out 1x, allowed 0x",
+    "abuseipdb went out 1x, allowed 0x",
+    "notify_host went out 1x, allowed 0x",
+    "file written outside the sandbox folders: escaped-host.eml",
+    "file written outside the sandbox folders: escaped.json",
+    "file written outside the sandbox folders: escaped.md"
+   ],
+   "violations": 8,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 10.17120000324212
+  },
+  {
+   "id": "slash-in-id",
+   "group": "hostile",
+   "title": "event_id contains a slash",
+   "status": "unsafe",
+   "expected": {},
+   "executed": {
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1
+   },
+   "cells": {
+    "feed": "withheld",
+    "urlscan": "forbidden",
+    "netcraft": "forbidden",
+    "abuseipdb": "forbidden",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [
+    "urlscan went out 1x, allowed 0x",
+    "netcraft went out 1x, allowed 0x",
+    "abuseipdb went out 1x, allowed 0x"
+   ],
+   "violations": 3,
+   "crashed": false,
+   "receipts_total": 3,
+   "receipts_ok": 3,
+   "latency_ms": 8.11249999969732
+  },
+  {
+   "id": "backslash-in-id",
+   "group": "hostile",
+   "title": "event_id contains a backslash path",
+   "status": "unsafe",
+   "expected": {},
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "forbidden",
+    "urlscan": "forbidden",
+    "netcraft": "forbidden",
+    "abuseipdb": "forbidden",
+    "notify_host": "forbidden",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [
+    "feed went out 1x, allowed 0x",
+    "urlscan went out 1x, allowed 0x",
+    "netcraft went out 1x, allowed 0x",
+    "abuseipdb went out 1x, allowed 0x",
+    "notify_host went out 1x, allowed 0x",
+    "file written outside the sandbox folders: escaped-host.eml",
+    "file written outside the sandbox folders: escaped.json",
+    "file written outside the sandbox folders: escaped.md"
+   ],
+   "violations": 8,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 11.648699990473688
+  },
+  {
+   "id": "header-injection-id",
+   "group": "hostile",
+   "title": "event_id carries a line break and a forged mail header",
+   "status": "unsafe",
+   "expected": {},
+   "executed": {
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1
+   },
+   "cells": {
+    "feed": "withheld",
+    "urlscan": "forbidden",
+    "netcraft": "forbidden",
+    "abuseipdb": "forbidden",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [
+    "urlscan went out 1x, allowed 0x",
+    "netcraft went out 1x, allowed 0x",
+    "abuseipdb went out 1x, allowed 0x"
+   ],
+   "violations": 3,
+   "crashed": false,
+   "receipts_total": 3,
+   "receipts_ok": 3,
+   "latency_ms": 13.081400000373833
+  },
+  {
+   "id": "empty-id",
+   "group": "hostile",
+   "title": "event_id is empty",
+   "status": "unsafe",
+   "expected": {},
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "forbidden",
+    "urlscan": "forbidden",
+    "netcraft": "forbidden",
+    "abuseipdb": "forbidden",
+    "notify_host": "forbidden",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [
+    "feed went out 1x, allowed 0x",
+    "urlscan went out 1x, allowed 0x",
+    "netcraft went out 1x, allowed 0x",
+    "abuseipdb went out 1x, allowed 0x",
+    "notify_host went out 1x, allowed 0x"
+   ],
+   "violations": 5,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 41.780700004892424
+  },
+  {
+   "id": "text-false-detection",
+   "group": "hostile",
+   "title": "Detection flag arrives as the text \"false\"",
+   "status": "unsafe",
+   "expected": {},
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "forbidden",
+    "urlscan": "forbidden",
+    "netcraft": "forbidden",
+    "abuseipdb": "forbidden",
+    "notify_host": "forbidden",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [
+    "feed went out 1x, allowed 0x",
+    "urlscan went out 1x, allowed 0x",
+    "netcraft went out 1x, allowed 0x",
+    "abuseipdb went out 1x, allowed 0x",
+    "notify_host went out 1x, allowed 0x"
+   ],
+   "violations": 5,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 83.17270000407007
+  },
+  {
+   "id": "text-zero-detection",
+   "group": "hostile",
+   "title": "Detection flag arrives as the text \"0\"",
+   "status": "unsafe",
+   "expected": {},
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "forbidden",
+    "urlscan": "forbidden",
+    "netcraft": "forbidden",
+    "abuseipdb": "forbidden",
+    "notify_host": "forbidden",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [
+    "feed went out 1x, allowed 0x",
+    "urlscan went out 1x, allowed 0x",
+    "netcraft went out 1x, allowed 0x",
+    "abuseipdb went out 1x, allowed 0x",
+    "notify_host went out 1x, allowed 0x"
+   ],
+   "violations": 5,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 94.45649999543093
+  },
+  {
+   "id": "null-confidence",
+   "group": "hostile",
+   "title": "Confidence is null",
+   "status": "crash",
+   "expected": {},
+   "executed": {},
+   "cells": {
+    "feed": "withheld",
+    "urlscan": "withheld",
+    "netcraft": "withheld",
+    "abuseipdb": "withheld",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [
+    "TypeError: float() argument must be a string or a real number, not 'NoneType'"
+   ],
+   "violations": 0,
+   "crashed": true,
+   "receipts_total": 0,
+   "receipts_ok": 0,
+   "latency_ms": 0.0
+  },
+  {
+   "id": "word-confidence",
+   "group": "hostile",
+   "title": "Confidence is the word \"high\"",
+   "status": "crash",
+   "expected": {},
+   "executed": {},
+   "cells": {
+    "feed": "withheld",
+    "urlscan": "withheld",
+    "netcraft": "withheld",
+    "abuseipdb": "withheld",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [
+    "ValueError: could not convert string to float: 'high'"
+   ],
+   "violations": 0,
+   "crashed": true,
+   "receipts_total": 0,
+   "receipts_ok": 0,
+   "latency_ms": 0.0
+  },
+  {
+   "id": "nan-confidence",
+   "group": "hostile",
+   "title": "Confidence is not-a-number, which passes naive comparisons",
+   "status": "unsafe",
+   "expected": {},
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "forbidden",
+    "urlscan": "forbidden",
+    "netcraft": "forbidden",
+    "abuseipdb": "forbidden",
+    "notify_host": "forbidden",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [
+    "feed went out 1x, allowed 0x",
+    "urlscan went out 1x, allowed 0x",
+    "netcraft went out 1x, allowed 0x",
+    "abuseipdb went out 1x, allowed 0x",
+    "notify_host went out 1x, allowed 0x"
+   ],
+   "violations": 5,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 82.48779999848921
+  },
+  {
+   "id": "infinite-confidence",
+   "group": "hostile",
+   "title": "Confidence is infinity",
+   "status": "unsafe",
+   "expected": {},
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "forbidden",
+    "urlscan": "forbidden",
+    "netcraft": "forbidden",
+    "abuseipdb": "forbidden",
+    "notify_host": "forbidden",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [
+    "feed went out 1x, allowed 0x",
+    "urlscan went out 1x, allowed 0x",
+    "netcraft went out 1x, allowed 0x",
+    "abuseipdb went out 1x, allowed 0x",
+    "notify_host went out 1x, allowed 0x"
+   ],
+   "violations": 5,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 54.25420000392478
+  },
+  {
+   "id": "out-of-range-confidence",
+   "group": "hostile",
+   "title": "Confidence 7.5 is outside 0 to 1",
+   "status": "unsafe",
+   "expected": {},
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "forbidden",
+    "urlscan": "forbidden",
+    "netcraft": "forbidden",
+    "abuseipdb": "forbidden",
+    "notify_host": "forbidden",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [
+    "feed went out 1x, allowed 0x",
+    "urlscan went out 1x, allowed 0x",
+    "netcraft went out 1x, allowed 0x",
+    "abuseipdb went out 1x, allowed 0x",
+    "notify_host went out 1x, allowed 0x"
+   ],
+   "violations": 5,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 97.41590000339784
+  },
+  {
+   "id": "negative-confidence",
+   "group": "hostile",
+   "title": "Confidence is negative",
+   "status": "pass",
+   "expected": {},
+   "executed": {},
+   "cells": {
+    "feed": "withheld",
+    "urlscan": "withheld",
+    "netcraft": "withheld",
+    "abuseipdb": "withheld",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 0,
+   "receipts_ok": 0,
+   "latency_ms": 6.179700008942746
+  },
+  {
+   "id": "missing-url",
+   "group": "hostile",
+   "title": "target_url is missing",
+   "status": "crash",
+   "expected": {},
+   "executed": {},
+   "cells": {
+    "feed": "withheld",
+    "urlscan": "withheld",
+    "netcraft": "withheld",
+    "abuseipdb": "withheld",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [
+    "TypeError: Verdict.__init__() missing 1 required positional argument: 'target_url'"
+   ],
+   "violations": 0,
+   "crashed": true,
+   "receipts_total": 0,
+   "receipts_ok": 0,
+   "latency_ms": 0.0
+  },
+  {
+   "id": "empty-url",
+   "group": "hostile",
+   "title": "target_url is empty",
+   "status": "pass",
+   "expected": {},
+   "executed": {},
+   "cells": {
+    "feed": "withheld",
+    "urlscan": "withheld",
+    "netcraft": "withheld",
+    "abuseipdb": "withheld",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 0,
+   "receipts_ok": 0,
+   "latency_ms": 1.9766000041272491
+  },
+  {
+   "id": "null-url",
+   "group": "hostile",
+   "title": "target_url is null",
+   "status": "pass",
+   "expected": {},
+   "executed": {},
+   "cells": {
+    "feed": "withheld",
+    "urlscan": "withheld",
+    "netcraft": "withheld",
+    "abuseipdb": "withheld",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 0,
+   "receipts_ok": 0,
+   "latency_ms": 12.590099999215454
+  },
+  {
+   "id": "javascript-url",
+   "group": "hostile",
+   "title": "target_url is a javascript: URL",
+   "status": "pass",
+   "expected": {},
+   "executed": {},
+   "cells": {
+    "feed": "withheld",
+    "urlscan": "withheld",
+    "netcraft": "withheld",
+    "abuseipdb": "withheld",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 0,
+   "receipts_ok": 0,
+   "latency_ms": 7.6649999973597005
+  },
+  {
+   "id": "ftp-url",
+   "group": "hostile",
+   "title": "Only http and https targets are acted on",
+   "status": "unsafe",
+   "expected": {},
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "forbidden",
+    "urlscan": "forbidden",
+    "netcraft": "forbidden",
+    "abuseipdb": "forbidden",
+    "notify_host": "forbidden",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [
+    "feed went out 1x, allowed 0x",
+    "urlscan went out 1x, allowed 0x",
+    "netcraft went out 1x, allowed 0x",
+    "abuseipdb went out 1x, allowed 0x",
+    "notify_host went out 1x, allowed 0x"
+   ],
+   "violations": 5,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 64.79859999672044
+  },
+  {
+   "id": "file-url",
+   "group": "hostile",
+   "title": "target_url is a file: URL",
+   "status": "pass",
+   "expected": {},
+   "executed": {},
+   "cells": {
+    "feed": "withheld",
+    "urlscan": "withheld",
+    "netcraft": "withheld",
+    "abuseipdb": "withheld",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 0,
+   "receipts_ok": 0,
+   "latency_ms": 1.1860999948112294
+  },
+  {
+   "id": "newline-in-url",
+   "group": "hostile",
+   "title": "target_url carries a line break and a forged header",
+   "status": "unsafe",
+   "expected": {},
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "forbidden",
+    "urlscan": "forbidden",
+    "netcraft": "forbidden",
+    "abuseipdb": "forbidden",
+    "notify_host": "forbidden",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [
+    "feed went out 1x, allowed 0x",
+    "urlscan went out 1x, allowed 0x",
+    "netcraft went out 1x, allowed 0x",
+    "abuseipdb went out 1x, allowed 0x",
+    "notify_host went out 1x, allowed 0x"
+   ],
+   "violations": 5,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 65.12980000115931
+  },
+  {
+   "id": "space-in-host",
+   "group": "hostile",
+   "title": "Host contains a space",
+   "status": "unsafe",
+   "expected": {},
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "forbidden",
+    "urlscan": "forbidden",
+    "netcraft": "forbidden",
+    "abuseipdb": "forbidden",
+    "notify_host": "forbidden",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [
+    "feed went out 1x, allowed 0x",
+    "urlscan went out 1x, allowed 0x",
+    "netcraft went out 1x, allowed 0x",
+    "abuseipdb went out 1x, allowed 0x",
+    "notify_host went out 1x, allowed 0x"
+   ],
+   "violations": 5,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 61.630399999557994
+  },
+  {
+   "id": "not-a-dict",
+   "group": "hostile",
+   "title": "The verdict is a bare string instead of an object",
+   "status": "crash",
+   "expected": {},
+   "executed": {},
+   "cells": {
+    "feed": "withheld",
+    "urlscan": "withheld",
+    "netcraft": "withheld",
+    "abuseipdb": "withheld",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [
+    "AttributeError: 'str' object has no attribute 'controlled'"
+   ],
+   "violations": 0,
+   "crashed": true,
+   "receipts_total": 0,
+   "receipts_ok": 0,
+   "latency_ms": 0.0
+  },
+  {
+   "id": "list-verdict",
+   "group": "hostile",
+   "title": "The verdict is a list",
+   "status": "crash",
+   "expected": {},
+   "executed": {},
+   "cells": {
+    "feed": "withheld",
+    "urlscan": "withheld",
+    "netcraft": "withheld",
+    "abuseipdb": "withheld",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [
+    "AttributeError: 'list' object has no attribute 'controlled'"
+   ],
+   "violations": 0,
+   "crashed": true,
+   "receipts_total": 0,
+   "receipts_ok": 0,
+   "latency_ms": 0.0
+  },
+  {
+   "id": "live-link-in-evidence",
+   "group": "hostile",
+   "title": "Evidence text contains a live link, which must not reach a page or mail",
+   "status": "unsafe",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [
+    "live link in a page or mail meant for people"
+   ],
+   "violations": 1,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 54.75769999611657
+  },
+  {
+   "id": "target-quoted-in-evidence",
+   "group": "hostile",
+   "title": "Evidence quotes the target URL itself",
+   "status": "unsafe",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [
+    "live link in a page or mail meant for people"
+   ],
+   "violations": 1,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 88.05910000228323
+  },
+  {
+   "id": "markdown-in-evidence",
+   "group": "hostile",
+   "title": "Evidence carries markdown, a table and line breaks",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 56.45070000900887
+  },
+  {
+   "id": "huge-evidence",
+   "group": "hostile",
+   "title": "Evidence is 200,000 characters long",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 190.79819999751635
+  },
+  {
+   "id": "unknown-threat-type",
+   "group": "hostile",
+   "title": "Threat type the Actor has never heard of",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 57.640500002889894
+  },
+  {
+   "id": "garbage-timestamp",
+   "group": "hostile",
+   "title": "Timestamp is not a timestamp",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 61.8757999909576
+  },
+  {
+   "id": "duplicate-event",
+   "group": "lifecycle",
+   "title": "The same verdict arrives twice and is acted on once",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 46.158299992384855
+  },
+  {
+   "id": "same-domain-new-event",
+   "group": "lifecycle",
+   "title": "A second event for an already handled domain sends nothing new",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 43.381550000049174
+  },
+  {
+   "id": "volume",
+   "group": "lifecycle",
+   "title": "Eight different threats in a row are all handled",
+   "status": "fail",
+   "expected": {
+    "feed": 8,
+    "urlscan": 8,
+    "netcraft": 8,
+    "abuseipdb": 8,
+    "notify_host": 8
+   },
+   "executed": {
+    "feed": 5,
+    "urlscan": 5,
+    "netcraft": 5,
+    "abuseipdb": 8,
+    "notify_host": 8
+   },
+   "cells": {
+    "feed": "missed",
+    "urlscan": "missed",
+    "netcraft": "missed",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [
+    "feed: expected 8, got 5",
+    "urlscan: expected 8, got 5",
+    "netcraft: expected 8, got 5"
+   ],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 31,
+   "receipts_ok": 31,
+   "latency_ms": 83.09715000359574
+  },
+  {
+   "id": "abuse-desk-rate-limit",
+   "group": "lifecycle",
+   "title": "One abuse desk gets at most five reports an hour, protection continues",
+   "status": "unsafe",
+   "expected": {
+    "feed": 8,
+    "urlscan": 8,
+    "netcraft": 8,
+    "abuseipdb": 1,
+    "notify_host": 5
+   },
+   "executed": {
+    "feed": 5,
+    "urlscan": 5,
+    "netcraft": 5,
+    "abuseipdb": 5,
+    "notify_host": 5
+   },
+   "cells": {
+    "feed": "missed",
+    "urlscan": "missed",
+    "netcraft": "missed",
+    "abuseipdb": "forbidden",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [
+    "abuseipdb went out 5x, allowed 1x",
+    "feed: expected 8, got 5",
+    "urlscan: expected 8, got 5",
+    "netcraft: expected 8, got 5"
+   ],
+   "violations": 1,
+   "crashed": false,
+   "receipts_total": 25,
+   "receipts_ok": 25,
+   "latency_ms": 66.31319999723928
+  },
+  {
+   "id": "escalate-when-still-up",
+   "group": "lifecycle",
+   "title": "Still up after the window, so the registrar is told",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1,
+    "notify_registrar": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1,
+    "notify_registrar": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "acted",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 6,
+   "receipts_ok": 6,
+   "latency_ms": 67.84580000385176
+  },
+  {
+   "id": "no-early-escalation",
+   "group": "lifecycle",
+   "title": "Still up but inside the window, so nothing more is sent",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 57.28839999937918
+  },
+  {
+   "id": "escalate-only-once",
+   "group": "lifecycle",
+   "title": "The registrar is told once, however often the check runs",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1,
+    "notify_registrar": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1,
+    "notify_registrar": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "acted",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 6,
+   "receipts_ok": 6,
+   "latency_ms": 54.52700000023469
+  },
+  {
+   "id": "no-escalation-without-host-notice",
+   "group": "lifecycle",
+   "title": "The registrar is not told when the host never was",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 4,
+   "receipts_ok": 4,
+   "latency_ms": 22.860299999592826
+  },
+  {
+   "id": "confirm-after-two-failures",
+   "group": "lifecycle",
+   "title": "Two failed checks in a row confirm the takedown and clear the blocklist",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1,
+    "confirm": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1,
+    "confirm": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "acted"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 70.68319999962114
+  },
+  {
+   "id": "one-failure-is-not-proof",
+   "group": "lifecycle",
+   "title": "A single failed check confirms nothing",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 47.85640000773128
+  },
+  {
+   "id": "flapping-target",
+   "group": "lifecycle",
+   "title": "Down, up, down is not a takedown",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 75.93539998924825
+  },
+  {
+   "id": "no-escalation-after-confirm",
+   "group": "lifecycle",
+   "title": "A confirmed takedown is never escalated afterwards",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1,
+    "confirm": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1,
+    "confirm": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "acted"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 60.26990000100341
+  },
+  {
+   "id": "kill-switch-during-recheck",
+   "group": "lifecycle",
+   "title": "The kill switch also stops an escalation",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1,
+    "abuseipdb": 1,
+    "notify_host": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "acted",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 5,
+   "receipts_ok": 5,
+   "latency_ms": 81.58369999728166
+  },
+  {
+   "id": "controlled-loop",
+   "group": "lifecycle",
+   "title": "Controlled target goes from report to confirmed down",
+   "status": "pass",
+   "expected": {
+    "notify_host": 1,
+    "mock_registrar": 1,
+    "confirm": 1
+   },
+   "executed": {
+    "notify_host": 1,
+    "mock_registrar": 1,
+    "confirm": 1
+   },
+   "cells": {
+    "feed": "withheld",
+    "urlscan": "withheld",
+    "netcraft": "withheld",
+    "abuseipdb": "withheld",
+    "notify_host": "acted",
+    "notify_registrar": "withheld",
+    "mock_registrar": "acted",
+    "confirm": "acted"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 2,
+   "receipts_ok": 2,
+   "latency_ms": 26.918299990938976
+  },
+  {
+   "id": "platform-never-escalated",
+   "group": "lifecycle",
+   "title": "A page on an allowlisted platform is never escalated to a registrar",
+   "status": "pass",
+   "expected": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1
+   },
+   "executed": {
+    "feed": 1,
+    "urlscan": 1,
+    "netcraft": 1
+   },
+   "cells": {
+    "feed": "acted",
+    "urlscan": "acted",
+    "netcraft": "acted",
+    "abuseipdb": "withheld",
+    "notify_host": "withheld",
+    "notify_registrar": "withheld",
+    "mock_registrar": "withheld",
+    "confirm": "withheld"
+   },
+   "problems": [],
+   "violations": 0,
+   "crashed": false,
+   "receipts_total": 3,
+   "receipts_ok": 3,
+   "latency_ms": 38.574899997911416
+  }
+ ],
+ "previous_score": null,
+ "delta": null,
+ "flipped": {
+  "fixed": [],
+  "broken": []
+ },
+ "verdict": "UNSAFE"
+}

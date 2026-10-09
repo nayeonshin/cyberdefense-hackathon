@@ -54,6 +54,7 @@ class Ledger:
         self.path = path or (config.ROOT / "ledger" / "actions.jsonl")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._client = None
+        self._rows = None            # loaded on first use, then kept in step by append()
         self._use_clickhouse = use_clickhouse
         self._table_ready = False
 
@@ -69,6 +70,7 @@ class Ledger:
 
     def append(self, receipt: Receipt) -> None:
         row = receipt.to_dict()
+        self.all().append(row)
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(row) + "\n")
         try:
@@ -94,10 +96,12 @@ class Ledger:
         self.state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
     def all(self) -> list:
-        if not self.path.exists():
-            return []
-        with self.path.open(encoding="utf-8") as handle:
-            return [json.loads(line) for line in handle if line.strip()]
+        if self._rows is None:
+            self._rows = []
+            if self.path.exists():
+                with self.path.open(encoding="utf-8") as handle:
+                    self._rows = [json.loads(line) for line in handle if line.strip()]
+        return self._rows
 
     def done_actions(self, domain: str) -> frozenset:
         """Actions that really went out for this domain (dry runs do not count)."""

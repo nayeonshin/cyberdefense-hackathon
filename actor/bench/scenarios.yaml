@@ -1,0 +1,566 @@
+# The range. Scenarios are only ever added, never removed or weakened.
+#
+# Every scenario starts from this verdict, with `verdict:` laid on top:
+#   event_id evt-<id>, target_url https://<id>.bad.example/login, confidence 0.96,
+#   semgrep_detected true, corroborated true
+# and from the `small_host` infrastructure profile unless `enrichment:` says otherwise.
+#
+# expect: the exact actions that must go out. Shorthands:
+#   full      feed, urlscan, netcraft, abuseipdb, notify_host
+#   report    feed, urlscan, netcraft, abuseipdb
+#   url_only  feed, urlscan, netcraft
+#   protect   feed
+#   none      nothing at all
+# or a map of action -> count. Anything sent beyond `expect` is a safety violation.
+
+# ---------------------------------------------------------------- should act
+- id: full-ladder
+  group: act
+  title: Confident, confirmed phishing on a small host
+  expect: full
+
+- id: boundary-protect
+  group: act
+  title: Confidence exactly 0.80 publishes to the feed and nothing more
+  verdict: {confidence_score: 0.80}
+  expect: protect
+
+- id: boundary-report
+  group: act
+  title: Confidence exactly 0.90 reaches the reporting platforms
+  verdict: {confidence_score: 0.90}
+  expect: report
+
+- id: boundary-notify
+  group: act
+  title: Confidence exactly 0.95 notifies the host
+  verdict: {confidence_score: 0.95}
+  expect: full
+
+- id: just-below-notify
+  group: act
+  title: Confidence 0.949 stops short of mailing the host
+  verdict: {confidence_score: 0.949}
+  expect: report
+
+- id: uncorroborated
+  group: act
+  title: Very confident but no second source, so the host is not mailed
+  verdict: {confidence_score: 0.99, corroborated: false}
+  expect: report
+
+- id: malware-type
+  group: act
+  title: Malware instead of phishing
+  verdict: {threat_type: malware}
+  expect: full
+
+- id: ip-literal-target
+  group: act
+  title: Payload served from a bare public IP address
+  verdict: {target_url: "http://203.0.113.7/payload.exe"}
+  expect: full
+
+- id: port-and-query
+  group: act
+  title: URL with a port, a path and a query string
+  verdict: {target_url: "https://port-and-query.bad.example:8443/a/b?c=d&e=f"}
+  expect: full
+  checks: {blocklist_has: [port-and-query.bad.example]}
+
+- id: uppercase-host
+  group: act
+  title: Host and scheme in capitals are normalised
+  verdict: {target_url: "HTTPS://UPPERCASE-HOST.BAD.EXAMPLE/Login"}
+  expect: full
+  checks: {blocklist_has: [uppercase-host.bad.example]}
+
+- id: punycode-host
+  group: act
+  title: Internationalised lookalike domain in punycode
+  verdict: {target_url: "https://xn--pypal-4ve.bad.example/signin"}
+  expect: full
+
+- id: trailing-dot-host
+  group: act
+  title: Fully qualified host with a trailing dot is listed without it
+  verdict: {target_url: "https://trailing-dot-host.bad.example./x"}
+  expect: full
+  checks:
+    blocklist_has: [trailing-dot-host.bad.example]
+    blocklist_lacks: ["trailing-dot-host.bad.example."]
+
+- id: no-abuse-contact
+  group: act
+  title: Host has no published abuse contact
+  enrichment: no_contacts
+  expect: report
+
+- id: unresolvable
+  group: act
+  title: Domain does not resolve any more
+  enrichment: no_dns
+  expect: url_only
+
+- id: cdn-fronted
+  group: act
+  title: Site sits behind a CDN, whose IP must not be reported
+  enrichment: cloudflare
+  expect: {feed: 1, urlscan: 1, netcraft: 1, notify_host: 1}
+
+- id: lookalike-prefix
+  group: act
+  title: google.com.evil.example is not Google and gets the full ladder
+  verdict: {target_url: "https://google.com.lookalike-prefix.bad.example/"}
+  expect: full
+
+- id: lookalike-suffix
+  group: act
+  title: notallowed.example must not ride on the allowlist entry allowed.example
+  policy: {allowlist_add: [allowed.example]}
+  verdict: {target_url: "https://notallowed.example/login"}
+  expect: full
+
+- id: userinfo-trick
+  group: act
+  title: "google.com@ in front of the real host does not make it Google"
+  verdict: {target_url: "https://google.com@userinfo-trick.bad.example/login"}
+  expect: full
+  checks: {blocklist_has: [userinfo-trick.bad.example]}
+
+- id: text-true-detection
+  group: act
+  title: Detection flag arrives as the text "true"
+  verdict: {semgrep_detected: "true"}
+  expect: full
+
+- id: text-confidence
+  group: act
+  title: Confidence arrives as the text "0.96"
+  verdict: {confidence_score: "0.96"}
+  expect: full
+
+- id: extra-fields
+  group: act
+  title: Unknown extra fields are ignored
+  verdict: {takedown_status: pending, ip_address: "203.0.113.7", anything: [1, 2, 3]}
+  expect: full
+
+# ---------------------------------------------------------------- must not act
+- id: below-threshold
+  group: withhold
+  title: Confidence 0.62 does nothing
+  verdict: {confidence_score: 0.62}
+  expect: none
+
+- id: just-below-protect
+  group: withhold
+  title: Confidence 0.799 does nothing
+  verdict: {confidence_score: 0.799}
+  expect: none
+
+- id: zero-confidence
+  group: withhold
+  title: Flagged but with zero confidence
+  verdict: {confidence_score: 0.0}
+  expect: none
+
+- id: not-detected
+  group: withhold
+  title: Not a detection, whatever the confidence says
+  verdict: {semgrep_detected: false, confidence_score: 0.99}
+  expect: none
+
+- id: simulated
+  group: withhold
+  title: Fixture data is never sent
+  verdict: {simulated: true}
+  expect: none
+
+- id: kill-switch
+  group: withhold
+  title: The kill switch stops everything
+  env: {ACTOR_STOP: "1"}
+  expect: none
+
+- id: allowlisted-platform
+  group: withhold
+  title: Bad page on Google Sites is reported per URL, the domain is never blocked
+  verdict: {target_url: "https://sites.google.com/view/fake-invoice"}
+  expect: url_only
+  checks: {blocklist_lacks: [sites.google.com, google.com]}
+
+- id: allowlisted-subdomain
+  group: withhold
+  title: Subdomain of an allowlisted domain is covered by it
+  policy: {allowlist_add: [allowed.example]}
+  verdict: {target_url: "https://deep.sub.allowed.example/x"}
+  expect: url_only
+  checks: {blocklist_lacks: [deep.sub.allowed.example, allowed.example]}
+
+- id: allowlisted-trailing-dot
+  group: withhold
+  title: github.com with a trailing dot is still GitHub
+  verdict: {target_url: "https://github.com./some/repo"}
+  expect: url_only
+  checks: {blocklist_lacks: [github.com, "github.com."]}
+
+- id: allowlisted-uppercase
+  group: withhold
+  title: GitHub.com in mixed case is still GitHub
+  verdict: {target_url: "https://GitHub.com/some/repo"}
+  expect: url_only
+  checks: {blocklist_lacks: [github.com]}
+
+- id: shared-network
+  group: withhold
+  title: IP on a shared network is never reported to an IP reputation list
+  enrichment: akamai
+  expect: {feed: 1, urlscan: 1, netcraft: 1, notify_host: 1}
+
+- id: private-ip-resolution
+  group: withhold
+  title: Domain resolves to a private address, which is never reported
+  enrichment: private
+  expect: url_only
+
+- id: loopback-resolution
+  group: withhold
+  title: Domain resolves to 127.0.0.1, which is never reported
+  enrichment: loopback
+  expect: url_only
+
+- id: private-ip-target
+  group: withhold
+  title: Target is itself a private address and is refused outright
+  verdict: {target_url: "http://192.168.1.10/admin"}
+  enrichment: private
+  expect: none
+
+- id: controlled-target
+  group: withhold
+  title: The team's own test page only reaches the mock registrar and the mail sink
+  verdict: {target_url: "http://localhost:8099/site", controlled: true}
+  expect: {mock_registrar: 1, notify_host: 1}
+
+- id: localhost-without-flag
+  group: withhold
+  title: A localhost target is treated as the team's own even without the flag
+  verdict: {target_url: "http://localhost:8099/site"}
+  expect: {mock_registrar: 1, notify_host: 1}
+
+# ---------------------------------------------------------------- hostile or broken input
+- id: path-traversal-id
+  group: hostile
+  title: "event_id tries to climb out of the feed folder"
+  verdict: {event_id: "../../../escaped"}
+  expect: none
+
+- id: slash-in-id
+  group: hostile
+  title: event_id contains a slash
+  verdict: {event_id: "evt/123"}
+  expect: none
+
+- id: backslash-in-id
+  group: hostile
+  title: event_id contains a backslash path
+  verdict: {event_id: "..\\..\\escaped"}
+  expect: none
+
+- id: header-injection-id
+  group: hostile
+  title: event_id carries a line break and a forged mail header
+  verdict: {event_id: "evt-1\nBcc: attacker@evil.example"}
+  expect: none
+
+- id: empty-id
+  group: hostile
+  title: event_id is empty
+  verdict: {event_id: ""}
+  expect: none
+
+- id: text-false-detection
+  group: hostile
+  title: Detection flag arrives as the text "false"
+  verdict: {semgrep_detected: "false"}
+  expect: none
+
+- id: text-zero-detection
+  group: hostile
+  title: Detection flag arrives as the text "0"
+  verdict: {semgrep_detected: "0"}
+  expect: none
+
+- id: null-confidence
+  group: hostile
+  title: Confidence is null
+  verdict: {confidence_score: null}
+  expect: none
+
+- id: word-confidence
+  group: hostile
+  title: Confidence is the word "high"
+  verdict: {confidence_score: high}
+  expect: none
+
+- id: nan-confidence
+  group: hostile
+  title: Confidence is not-a-number, which passes naive comparisons
+  verdict: {confidence_score: .nan}
+  expect: none
+
+- id: infinite-confidence
+  group: hostile
+  title: Confidence is infinity
+  verdict: {confidence_score: .inf}
+  expect: none
+
+- id: out-of-range-confidence
+  group: hostile
+  title: Confidence 7.5 is outside 0 to 1
+  verdict: {confidence_score: 7.5}
+  expect: none
+
+- id: negative-confidence
+  group: hostile
+  title: Confidence is negative
+  verdict: {confidence_score: -1}
+  expect: none
+
+- id: missing-url
+  group: hostile
+  title: target_url is missing
+  omit: [target_url]
+  expect: none
+
+- id: empty-url
+  group: hostile
+  title: target_url is empty
+  verdict: {target_url: ""}
+  expect: none
+
+- id: null-url
+  group: hostile
+  title: target_url is null
+  verdict: {target_url: null}
+  expect: none
+
+- id: javascript-url
+  group: hostile
+  title: "target_url is a javascript: URL"
+  verdict: {target_url: "javascript:alert(document.cookie)"}
+  expect: none
+
+- id: ftp-url
+  group: hostile
+  title: Only http and https targets are acted on
+  verdict: {target_url: "ftp://ftp-url.bad.example/file"}
+  expect: none
+
+- id: file-url
+  group: hostile
+  title: "target_url is a file: URL"
+  verdict: {target_url: "file:///etc/passwd"}
+  expect: none
+
+- id: newline-in-url
+  group: hostile
+  title: target_url carries a line break and a forged header
+  verdict: {target_url: "https://newline-in-url.bad.example/\r\nX-Injected: 1"}
+  expect: none
+
+- id: space-in-host
+  group: hostile
+  title: Host contains a space
+  verdict: {target_url: "https://space in host.bad.example/"}
+  expect: none
+
+- id: not-a-dict
+  group: hostile
+  title: The verdict is a bare string instead of an object
+  verdict_raw: "https://not-a-dict.bad.example/login"
+  expect: none
+
+- id: list-verdict
+  group: hostile
+  title: The verdict is a list
+  verdict_raw: ["evt-1", "https://list-verdict.bad.example/"]
+  expect: none
+
+- id: live-link-in-evidence
+  group: hostile
+  title: Evidence text contains a live link, which must not reach a page or mail
+  verdict: {evidence: "Form posts credentials to https://collector.bad.example/steal.php (line 44)"}
+  expect: full
+
+- id: target-quoted-in-evidence
+  group: hostile
+  title: Evidence quotes the target URL itself
+  verdict: {evidence: "Fetched https://target-quoted-in-evidence.bad.example/login and matched rule credential-stealer"}
+  expect: full
+
+- id: markdown-in-evidence
+  group: hostile
+  title: Evidence carries markdown, a table and line breaks
+  verdict: {evidence: "line one\n# Heading\n| a | b |\n|---|---|\n[click](javascript:alert(1))"}
+  expect: full
+
+- id: huge-evidence
+  group: hostile
+  title: Evidence is 200,000 characters long
+  evidence_repeat: 200000
+  expect: full
+
+- id: unknown-threat-type
+  group: hostile
+  title: Threat type the Actor has never heard of
+  verdict: {threat_type: "ransomware-xyz"}
+  expect: full
+
+- id: garbage-timestamp
+  group: hostile
+  title: Timestamp is not a timestamp
+  verdict: {timestamp: "yesterday-ish"}
+  expect: full
+
+# ---------------------------------------------------------------- lifecycle
+- id: duplicate-event
+  group: lifecycle
+  title: The same verdict arrives twice and is acted on once
+  steps:
+    - dispatch: {}
+    - dispatch: {}
+  expect: full
+
+- id: same-domain-new-event
+  group: lifecycle
+  title: A second event for an already handled domain sends nothing new
+  steps:
+    - dispatch: {}
+    - dispatch: {verdict: {event_id: evt-same-domain-second}}
+  expect: full
+
+- id: volume
+  group: lifecycle
+  title: Eight different threats in a row are all handled
+  enrichment: unique
+  steps:
+    - dispatch:
+        count: 8
+        verdict: {event_id: "evt-volume-{i}", target_url: "https://v{i}.volume.bad.example/login"}
+  expect: {feed: 8, urlscan: 8, netcraft: 8, abuseipdb: 8, notify_host: 8}
+
+- id: abuse-desk-rate-limit
+  group: lifecycle
+  title: One abuse desk gets at most five reports an hour, protection continues
+  steps:
+    - dispatch:
+        count: 8
+        verdict: {event_id: "evt-desk-{i}", target_url: "https://d{i}.desk.bad.example/login"}
+  expect: {feed: 8, urlscan: 8, netcraft: 8, abuseipdb: 1, notify_host: 5}
+
+- id: escalate-when-still-up
+  group: lifecycle
+  title: Still up after the window, so the registrar is told
+  policy: {escalate_after_seconds: 0}
+  steps:
+    - dispatch: {}
+    - recheck: {up: true}
+  expect: {feed: 1, urlscan: 1, netcraft: 1, abuseipdb: 1, notify_host: 1, notify_registrar: 1}
+
+- id: no-early-escalation
+  group: lifecycle
+  title: Still up but inside the window, so nothing more is sent
+  steps:
+    - dispatch: {}
+    - recheck: {up: true}
+  expect: full
+
+- id: escalate-only-once
+  group: lifecycle
+  title: The registrar is told once, however often the check runs
+  policy: {escalate_after_seconds: 0}
+  steps:
+    - dispatch: {}
+    - recheck: {up: true}
+    - recheck: {up: true}
+    - recheck: {up: true}
+  expect: {feed: 1, urlscan: 1, netcraft: 1, abuseipdb: 1, notify_host: 1, notify_registrar: 1}
+
+- id: no-escalation-without-host-notice
+  group: lifecycle
+  title: The registrar is not told when the host never was
+  policy: {escalate_after_seconds: 0}
+  steps:
+    - dispatch: {verdict: {corroborated: false}}
+    - recheck: {up: true}
+  expect: report
+
+- id: confirm-after-two-failures
+  group: lifecycle
+  title: Two failed checks in a row confirm the takedown and clear the blocklist
+  steps:
+    - dispatch: {}
+    - recheck: {up: false}
+    - recheck: {up: false}
+  expect: {feed: 1, urlscan: 1, netcraft: 1, abuseipdb: 1, notify_host: 1, confirm: 1}
+  checks: {blocklist_lacks: [confirm-after-two-failures.bad.example]}
+
+- id: one-failure-is-not-proof
+  group: lifecycle
+  title: A single failed check confirms nothing
+  steps:
+    - dispatch: {}
+    - recheck: {up: false}
+  expect: full
+  checks: {blocklist_has: [one-failure-is-not-proof.bad.example]}
+
+- id: flapping-target
+  group: lifecycle
+  title: Down, up, down is not a takedown
+  steps:
+    - dispatch: {}
+    - recheck: {up: false}
+    - recheck: {up: true}
+    - recheck: {up: false}
+  expect: full
+  checks: {blocklist_has: [flapping-target.bad.example]}
+
+- id: no-escalation-after-confirm
+  group: lifecycle
+  title: A confirmed takedown is never escalated afterwards
+  policy: {escalate_after_seconds: 0}
+  steps:
+    - dispatch: {}
+    - recheck: {up: false}
+    - recheck: {up: false}
+    - recheck: {up: true}
+  expect: {feed: 1, urlscan: 1, netcraft: 1, abuseipdb: 1, notify_host: 1, confirm: 1}
+
+- id: kill-switch-during-recheck
+  group: lifecycle
+  title: The kill switch also stops an escalation
+  policy: {escalate_after_seconds: 0}
+  steps:
+    - dispatch: {}
+    - recheck: {up: true, env: {ACTOR_STOP: "1"}}
+  expect: full
+
+- id: controlled-loop
+  group: lifecycle
+  title: Controlled target goes from report to confirmed down
+  steps:
+    - dispatch: {verdict: {target_url: "http://localhost:8099/site", controlled: true}}
+    - recheck: {up: false}
+    - recheck: {up: false}
+  expect: {mock_registrar: 1, notify_host: 1, confirm: 1}
+
+- id: platform-never-escalated
+  group: lifecycle
+  title: A page on an allowlisted platform is never escalated to a registrar
+  policy: {escalate_after_seconds: 0}
+  steps:
+    - dispatch: {verdict: {target_url: "https://sites.google.com/view/still-up"}}
+    - recheck: {up: true}
+  expect: url_only

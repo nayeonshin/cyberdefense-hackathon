@@ -1,5 +1,12 @@
 # Actor: autonomous action and dispatch (Member 3)
 
+![Actor bench scorecard](bench/scorecard.svg)
+
+The card above is rewritten by `python -m actor.bench`: 81 labelled scenarios run through the
+real dispatcher with every outside channel replaced by a recorder. One safety violation makes
+a run UNSAFE whatever its score. Details are in [bench/scenarios.yaml](bench/scenarios.yaml)
+and `bench/scorecard.html`.
+
 Takes a verified verdict and acts on it, one rung at a time. Every action writes a receipt.
 
 | Rung | Action | Fires when | Leaves the machine |
