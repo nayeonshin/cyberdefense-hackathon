@@ -1,8 +1,10 @@
 # Deployment and integration evidence
 
+Current deployment and redesign validation: [Ramp rollout](RAMP_ROLLOUT.md). The deployment below is historical and was replaced after provider closure.
+
 Verified October 9, 2026. This document records a controlled demonstration, not an external takedown.
 
-## Running service
+## Historical service (closed by provider)
 
 - Dashboard: <https://j37o2jgnu9bq57cesbda28htdc.ingress.akash-palmito.org/>
 - Console: <https://console.akash.network/deployments/1791574764504>
