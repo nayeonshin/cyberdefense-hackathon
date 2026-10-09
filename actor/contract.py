@@ -6,7 +6,9 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 EVENT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
-HOSTNAME = re.compile(r"[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?|[0-9A-Fa-f:]+")
+# Underscores are not allowed in registered names but are common in subdomains of
+# real phishing sites, so they are accepted here.
+HOSTNAME = re.compile(r"[A-Za-z0-9_]([A-Za-z0-9._-]*[A-Za-z0-9_])?|[0-9A-Fa-f:]+")
 TRUE_WORDS = {"true", "1", "yes"}
 FALSE_WORDS = {"false", "0", "no", ""}
 

@@ -342,7 +342,7 @@ def run_scenario(sc: dict, mutant: dict = None) -> dict:
     wire = Wire()
     env = {
         "LIVE_FEED": "1", "LIVE_URLSCAN": "1", "LIVE_NETCRAFT": "1", "LIVE_ABUSEIPDB": "1",
-        "LIVE_EMAIL": "0", "SMTP_LIVE_HOST": "", "ACTOR_STOP": "0",
+        "LIVE_EMAIL": "0", "SMTP_LIVE_HOST": "", "ACTOR_STOP": "0", "HISTORY_LOOKUP": "0",
         "URLSCAN_API_KEY": "bench", "ABUSEIPDB_API_KEY": "bench",
         "REPORTER_EMAIL": "reporter@bench.test", "REPORTER_ORG": "Bench",
         "NETCRAFT_REPORT_URL": "https://report.netcraft.com/api/v3/report/urls",

@@ -801,3 +801,31 @@
     - followup: {up: false, verdict_rows: true}
   expect: {feed: 1, urlscan: 1, netcraft: 1, abuseipdb: 1, notify_host: 1, confirm: 1}
   checks: {event_status: {verdicts-takedown-1: TAKEN_DOWN}}
+
+# ---------------------------------------------------------------- found by replaying 822,439 real URLs
+- id: underscore-host
+  group: act
+  title: Real phishing hosts use underscores (617 of them in the replayed data)
+  verdict: {target_url: "https://uphold_login.underscore-host.bad.example/"}
+  expect: full
+  checks: {blocklist_has: [uphold_login.underscore-host.bad.example]}
+
+- id: ipfs-gateway
+  group: withhold
+  title: A page on a public IPFS gateway is reported per URL, the gateway is never blocked
+  verdict: {target_url: "https://cloudflare-ipfs.com/ipfs/bafybeigdyrexamplehash/index.html"}
+  expect: url_only
+  checks: {blocklist_lacks: [cloudflare-ipfs.com]}
+
+- id: storage-platform
+  group: withhold
+  title: A file on a shared storage API is reported per URL, the platform is never blocked
+  verdict: {target_url: "https://storageapi.fleek.co/some-bucket/login.html"}
+  expect: url_only
+  checks: {blocklist_lacks: [storageapi.fleek.co, fleek.co]}
+
+- id: ipfs-subdomain-gateway
+  group: withhold
+  title: A subdomain-style IPFS gateway address is covered as well
+  verdict: {target_url: "https://bafybeigdyrexamplehash.ipfs.dweb.link/"}
+  expect: url_only

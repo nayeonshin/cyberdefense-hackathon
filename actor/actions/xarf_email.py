@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .. import config
 from ..contract import safe_id
-from ..evidence import defang, for_people
+from ..evidence import defang, for_people, on_record
 from . import Context, Outcome
 
 LIVE_FLAG = None          # always runs in live mode, but only into the sink by default
@@ -69,6 +69,8 @@ def build(ctx: Context, to_address: str) -> EmailMessage:
         f"Evidence:        {for_people(verdict.evidence)}",
         f"Evidence SHA-256: {ctx.sha}",
     ]
+    if on_record(ctx.bundle):
+        lines.append(f"On record:       {on_record(ctx.bundle)}")
     if feed:
         lines.append(f"Evidence bundle: {feed}/incidents/{verdict.event_id}.json")
     lines += [

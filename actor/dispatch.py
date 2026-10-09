@@ -9,7 +9,7 @@ import json
 import sys
 import time
 
-from . import config, evidence, policy as policy_module
+from . import config, evidence, history, policy as policy_module
 from .actions import Context, registry
 from .contract import DONE_STATUSES, Receipt, Verdict, safe_id
 from .enrich import Enrichment, enrich
@@ -31,7 +31,7 @@ LIMIT 20
 def run_plans(verdict: Verdict, enrichment: Enrichment, plans: list, live: bool,
               ledger: Ledger, policy: dict) -> list:
     """Execute (or only plan) each action and write one receipt per action."""
-    bundle = evidence.build(verdict, enrichment)
+    bundle = evidence.build(verdict, enrichment, history.lookup(verdict.host))
     sha = evidence.digest(bundle)
     modules = registry()
     limit = policy["rate_limit_per_recipient_per_hour"]

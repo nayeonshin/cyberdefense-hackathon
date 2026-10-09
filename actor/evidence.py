@@ -20,7 +20,24 @@ def for_people(text: str, limit: int = 2000) -> str:
     return text if len(text) <= limit else text[:limit] + f" [...] ({len(text)} characters in total)"
 
 
-def build(verdict: Verdict, enrichment: Enrichment) -> dict:
+def build(verdict: Verdict, enrichment: Enrichment, history: dict = None) -> dict:
+    bundle = _base(verdict, enrichment)
+    if history:
+        # Earlier reports about the same host, from the ClickHouse history table.
+        bundle["history"] = {k: history[k] for k in ("urls_on_record", "first_seen", "last_seen", "sources")}
+    return bundle
+
+
+def on_record(bundle: dict) -> str:
+    """One line for a report, or an empty string when the host has no history."""
+    history = bundle.get("history")
+    if not history:
+        return ""
+    return (f"{history['urls_on_record']} malicious URLs on record for this host, "
+            f"{history['first_seen']} to {history['last_seen']} ({history['sources']})")
+
+
+def _base(verdict: Verdict, enrichment: Enrichment) -> dict:
     return {
         "schema": "takedown-evidence/1",
         "event_id": verdict.event_id,

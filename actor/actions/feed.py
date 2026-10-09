@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .. import config
 from ..contract import now_iso, safe_id
-from ..evidence import defang, for_people
+from ..evidence import defang, for_people, on_record
 from ..policy import is_allowlisted
 from . import Context, Outcome
 
@@ -73,6 +73,7 @@ def _incident_page(ctx: Context) -> str:
         f"| Confidence | {verdict.confidence_score:.2f} |",
         f"| Hosting network | {_cell(enrichment.host_network) or 'unknown'} |",
         f"| Registrar | {_cell(enrichment.registrar) or 'unknown'} |",
+        *([f"| On record | {on_record(ctx.bundle)} |"] if on_record(ctx.bundle) else []),
         f"| Evidence SHA-256 | `{ctx.sha}` |",
         "",
         "## Evidence",
