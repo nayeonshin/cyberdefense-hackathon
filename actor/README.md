@@ -2,7 +2,7 @@
 
 ![Actor bench scorecard](bench/scorecard.svg)
 
-The card above is rewritten by `python -m actor.bench`: 123 labelled scenarios run through the
+The card above is rewritten by `python -m actor.bench`: 124 labelled scenarios run through the
 real dispatcher with every outside channel replaced by a recorder. One safety violation makes
 a run UNSAFE whatever its score. Details are in [bench/scenarios.yaml](bench/scenarios.yaml)
 and `bench/scorecard.html`.
@@ -217,6 +217,34 @@ python -m actor.recheck --live                             # run twice: confirme
 
 `POST http://localhost:8099/reset` restores the page. Controlled targets only ever reach the
 mock registrar and the mail sink.
+
+### The stage run
+
+Three terminals, then one command per run:
+
+```bash
+python -m actor.mock_registrar_server
+python -m brain.worker --interval 3
+python -m actor.intake --live --loop --interval 5
+python -m actor.stage
+```
+
+`actor.stage` restores the page, reports it to the pipeline under a new event id and prints
+each change of the event with the seconds since the report:
+
+```
+target http://localhost:8099/site/ is up (HTTP 200)
+   0.0 s  stage-214952 reported to the pipeline
+  15.2 s  VERIFIED  confidence 0.84
+  24.4 s  PUBLISHED_TAKEDOWN  http://localhost:8099/tickets/T-0001
+  35.0 s  TAKEN_DOWN  http://localhost:8099/tickets/T-0001
+target now answers: HTTP 410
+```
+
+Rehearsed eight times in a row: 30 to 55 s from report to confirmed takedown. Things the
+rehearsal showed: an event id that was used before is not scanned again, so every run needs
+a new one (the command picks one); a page that is already down when the scanner arrives
+ends as `FETCH_FAILED`; ticket links stop working when the mock server is restarted.
 
 ## Guardrails
 

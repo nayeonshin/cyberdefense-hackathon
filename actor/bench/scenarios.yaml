@@ -908,3 +908,29 @@
     - verdicts: {rows: [{target_url: "https://same.host.bad.example/a"}, {target_url: "https://same.host.bad.example/b"}]}
   expect: full
   checks: {event_status: {verdicts-second-url-same-host-1: PUBLISHED_TAKEDOWN, verdicts-second-url-same-host-2: PUBLISHED_TAKEDOWN}}
+
+# ---------------------------------------------------------------- found by rehearsing the stage loop
+- id: controlled-not-rate-limited
+  group: lifecycle
+  title: Rehearsing on the controlled target does not use up the mail limit; its mail only goes to the sink
+  steps:
+    - dispatch: {verdict: {event_id: evt-stage-1, target_url: "http://localhost:8099/site/", controlled: true}}
+    - recheck: {up: false}
+    - recheck: {up: false}
+    - dispatch: {verdict: {event_id: evt-stage-2, target_url: "http://localhost:8099/site/", controlled: true}}
+    - recheck: {up: false}
+    - recheck: {up: false}
+    - dispatch: {verdict: {event_id: evt-stage-3, target_url: "http://localhost:8099/site/", controlled: true}}
+    - recheck: {up: false}
+    - recheck: {up: false}
+    - dispatch: {verdict: {event_id: evt-stage-4, target_url: "http://localhost:8099/site/", controlled: true}}
+    - recheck: {up: false}
+    - recheck: {up: false}
+    - dispatch: {verdict: {event_id: evt-stage-5, target_url: "http://localhost:8099/site/", controlled: true}}
+    - recheck: {up: false}
+    - recheck: {up: false}
+    - dispatch: {verdict: {event_id: evt-stage-6, target_url: "http://localhost:8099/site/", controlled: true}}
+    - recheck: {up: false}
+    - recheck: {up: false}
+    - dispatch: {verdict: {event_id: evt-stage-7, target_url: "http://localhost:8099/site/", controlled: true}}
+  expect: {mock_registrar: 7, notify_host: 7, confirm: 6}

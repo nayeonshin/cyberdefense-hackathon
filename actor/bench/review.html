@@ -58,10 +58,10 @@ h1 em{font-style:normal;background:var(--grad);-webkit-background-clip:text;back
 .pos{margin-left:auto;font:500 13px var(--mono);color:var(--muted)}
 .pos b{color:var(--ink);font-weight:500}
 .url{font:500 clamp(17px,2.1vw,22px)/1.35 var(--mono);overflow-wrap:anywhere;letter-spacing:-.01em;margin:0 0 6px}
-.url a{color:inherit;text-decoration:none;background:linear-gradient(var(--signal),var(--signal)) 0 100%/0 1px no-repeat;transition:background-size .35s var(--ease),color .2s}
-.url a:hover{background-size:100% 1px;color:#fff}
-.url .go{display:inline-block;margin-left:12px;font:500 12px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--signal);border:1px solid rgba(116,228,255,.32);border-radius:999px;padding:3px 10px;vertical-align:middle;white-space:nowrap;transition:background .2s,transform .2s var(--ease)}
-.url a:hover .go{background:var(--signal-soft);transform:translateX(3px)}
+.url a.main,td a{color:inherit;text-decoration:none;background:linear-gradient(var(--signal),var(--signal)) 0 100%/0 1px no-repeat;transition:background-size .35s var(--ease),color .2s;cursor:pointer}
+.url a.main:hover,td a:hover{background-size:100% 1px;color:#fff}
+.url a.go{display:inline-block;text-decoration:none;margin-left:12px;font:500 12px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--signal);border:1px solid rgba(116,228,255,.32);border-radius:999px;padding:3px 10px;vertical-align:middle;white-space:nowrap;transition:background .2s,transform .2s var(--ease)}
+.url a.go:hover{background:var(--signal-soft);transform:translateX(3px)}
 .note{color:var(--ink2);margin:0 0 26px;max-width:70ch}
 .gauge{margin:0 0 30px}
 .glabel{display:flex;align-items:baseline;gap:10px;margin-bottom:10px;font:500 12px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
@@ -147,7 +147,7 @@ td.right{color:var(--right);font-family:var(--mono)}td.wrong{color:var(--wrong);
 </header>
 <main>
 <h1>Was this the <em>right call?</em></h1>
-<p class="lede">95 decisions out of 423 from the last stress run on ClickHouse: every hostile row and 12 of each other kind. Nothing here was sent: reports went to a recorder, mail to the mail sink. Click a URL to open the urlscan.io record of that host, with screenshots; the page itself is never opened from here.</p>
+<p class="lede">95 decisions out of 423 from the last stress run on ClickHouse: every hostile row and 12 of each other kind. Nothing here was sent: reports went to a recorder, mail to the mail sink. A click on a URL opens that address in a new tab. These are live phishing and malware addresses, so the urlscan button next to it shows the same page as screenshots without visiting it.</p>
 <div class="strip" id="strip"></div>
 <article class="case" id="card"></article>
 <div class="keys">
@@ -206,12 +206,19 @@ function record(c) {
   const ip = /^[0-9.]+$/.test(host) || host.includes(":");
   return "https://urlscan.io/" + (ip ? "ip/" : "domain/") + encodeURIComponent(host);
 }
+function live(c) {
+  const u = plain(c.url).split(" ... (")[0];
+  return /^https?:\/\/\S+$/i.test(u) ? u : "";
+}
+function link(text, href, cls, title) {
+  const a = el("a", cls, text); a.href = href; a.target = "_blank"; a.rel = "noopener noreferrer";
+  a.referrerPolicy = "no-referrer"; a.title = title; a.onclick = e => e.stopPropagation(); return a;
+}
 function target(c) {
-  const p = el("p", "url"), to = record(c), text = plain(c.url) || "(empty URL)";
-  if (!to) { p.textContent = text; return p; }
-  const a = el("a", "", text); a.href = to; a.target = "_blank"; a.rel = "noopener noreferrer";
-  a.title = "Opens the urlscan.io record of this host in a new tab, not the page itself";
-  a.append(el("span", "go", "urlscan \u2197")); p.append(a); return p;
+  const p = el("p", "url"), text = plain(c.url) || "(empty URL)", to = live(c), scan = record(c);
+  if (to) p.append(link(text, to, "main", "Opens this address in a new tab")); else p.append(el("span", "", text));
+  if (scan) p.append(link("urlscan \u2197", scan, "go", "Opens the urlscan.io record of this host: screenshots without visiting the page"));
+  return p;
 }
 function place(v) { let x = 0; for (const z of ZONES) { if (v < z[1]) return x + (v - z[0]) / (z[1] - z[0]) * z[2]; x += z[2]; } return 100; }
 
@@ -294,7 +301,9 @@ function tally() {
     cell.title = (i + 1) + ". " + GROUPS[c.group][0]; cell.setAttribute("aria-label", cell.title);
     cell.onclick = () => { at = i; show(); }; strip.append(cell);
     const tr = el("tr", "row");
-    tr.append(el("td", "n", two(i + 1)), el("td", "", GROUPS[c.group][0]), el("td", "m", plain(c.host || c.url.slice(0, 60))),
+    const where = el("td", "m"), label = plain(c.host || c.url.slice(0, 60));
+    if (live(c)) where.append(link(label, live(c), "", "Opens this address in a new tab")); else where.textContent = label;
+    tr.append(el("td", "n", two(i + 1)), el("td", "", GROUPS[c.group][0]), where,
       el("td", "n", c.confidence === null ? "missing" : c.confidence.toFixed(2)), el("td", "n", c.on_record.toLocaleString("en-US")),
       el("td", "m", c.sent.map(s => s.action).join(", ") || "nothing"), el("td", m ? m.mark : "", m ? m.mark : ""));
     tr.onclick = () => { at = i; show(); window.scrollTo({top: 0, behavior: "smooth"}); };

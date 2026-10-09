@@ -35,6 +35,8 @@ def run_plans(verdict: Verdict, enrichment: Enrichment, plans: list, live: bool,
     sha = evidence.digest(bundle)
     modules = registry()
     limit = policy["rate_limit_per_recipient_per_hour"]
+    # Mail about the team's own target only ever reaches the sink, so rehearsals are not counted.
+    controlled = policy_module.is_controlled(verdict, policy)
     receipts = []
     for plan in plans:
         module = modules[plan.action]
@@ -50,7 +52,7 @@ def run_plans(verdict: Verdict, enrichment: Enrichment, plans: list, live: bool,
             receipt.detail = "simulated verdict, never sent: " + receipt.detail
         elif module.LIVE_FLAG and not config.flag(module.LIVE_FLAG):
             receipt.detail = f"channel off ({module.LIVE_FLAG}=0): " + receipt.detail
-        elif plan.action in MAIL_ACTIONS and ledger.count_recent(plan.recipient) >= limit:
+        elif plan.action in MAIL_ACTIONS and not controlled and ledger.count_recent(plan.recipient) >= limit:
             receipt.status = "SKIPPED"
             receipt.detail = f"rate limit of {limit} mails per hour reached for {plan.recipient}"
         elif plan.action == "abuseipdb" and ledger.reported(plan.action, plan.recipient, verdict.host):
