@@ -1,12 +1,12 @@
-# The stage run with one command, from the repository root:
+# The stage run with one command. It works from any folder:
 #
-#     powershell -ExecutionPolicy Bypass -File actor\stage.ps1          start everything, run once
-#     python -m actor.stage                                             every further run
-#     powershell -ExecutionPolicy Bypass -File actor\stage.ps1 -Stop    close the three windows
+#     powershell -ExecutionPolicy Bypass -File <repo>\actor\stage.ps1           start everything, run once
+#     powershell -ExecutionPolicy Bypass -File <repo>\actor\stage.ps1 -Again    one more run
+#     powershell -ExecutionPolicy Bypass -File <repo>\actor\stage.ps1 -Stop     close the three windows
 #
 # It opens the controlled target, the scanner and the Actor in a window each, after stopping
 # any earlier copies: two scanners at once get in each other's way.
-param([switch]$Stop, [switch]$NoRun)
+param([switch]$Stop, [switch]$NoRun, [switch]$Again)
 
 $root = Split-Path -Parent $PSScriptRoot
 $modules = 'actor.mock_registrar_server', 'brain.worker', 'actor.intake'
@@ -18,6 +18,13 @@ function Stop-Stage {
             $line -and $line -notlike '*stage.ps1*' -and ($modules | Where-Object { $line -like "*-m $_*" })
         } |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+}
+
+if ($Again) {
+    Set-Location $root
+    $env:PYTHONUTF8 = '1'
+    python -m actor.stage
+    return
 }
 
 Stop-Stage
