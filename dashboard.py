@@ -137,6 +137,15 @@ def render_run_details(snapshot, error, pipeline):
 
 @st.fragment(run_every="2s")
 def live_panels():
+    context = (settings.source, settings.mode, settings.run_id, str(settings.data_dir),
+               *(os.getenv(name, "") for name in ("CLICKHOUSE_HOST", "CLICKHOUSE_DATABASE",
+                   "EVENTS_TABLE", "THREATS_TABLE", "VERDICTS_TABLE", "ACTIONS_TABLE")))
+    if st.session_state.get("snapshot_context") != context:
+        # A failed switch from fixtures to a backend must not relabel the old
+        # sample snapshot as real data. Retain stale data only within one source.
+        st.session_state.pop("snapshot", None)
+        st.session_state.pop("selected_event", None)
+        st.session_state["snapshot_context"] = context
     error = None
     try:
         st.session_state["snapshot"] = load_snapshot()

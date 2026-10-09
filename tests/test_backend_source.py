@@ -116,3 +116,16 @@ def test_backend_dashboard_is_read_only_and_escapes_evidence(tmp_path, monkeypat
     assert any("<form" in x.value for x in app.code)
     assert all("javascript:" not in str(x.proto) for x in app.get("link_button"))
     assert not (tmp_path / "coordinator.lock").exists()
+
+
+def test_failed_source_switch_does_not_relabel_fixtures_as_backend_data(tmp_path, monkeypatch):
+    from tests.test_presentation import app_fixture
+    app, source = app_fixture(tmp_path, monkeypatch)
+    app.run()
+    assert app.session_state["snapshot"]["events"]
+    monkeypatch.setenv("DATA_SOURCE", "backend")
+    source.get_events = lambda: (_ for _ in ()).throw(ConnectionError())
+    app.run()
+    assert not app.exception
+    assert app.session_state.get("snapshot") is None
+    assert any("Waiting for data" in item.value for item in app.info)
