@@ -11,7 +11,7 @@ from shipper.storage import read_json
 
 st.set_page_config(page_title="Takedown Orchestrator", page_icon="🛡️", layout="wide")
 st.markdown("""<style>
-.block-container{max-width:1440px;padding-top:2.2rem}
+.block-container{max-width:1440px;padding-top:3.2rem}
 [data-testid="stMetric"]{background:#102438;border:1px solid #294257;border-radius:12px;padding:20px}
 [data-testid="stMetricValue"]{color:#75e3c3;font-variant-numeric:tabular-nums}
 h1{letter-spacing:-1.4px} [data-testid="stCaptionContainer"]{color:#9fb3c8}
@@ -86,6 +86,11 @@ def live_panels():
         st.warning("Pending team handoff: " + ", ".join(supervisor["missing"]) + " command(s) are not configured.")
     if supervisor.get("status") == "failed":
         st.error("A supervised process exited: " + supervisor.get("process", "unknown"))
+    pipeline = read_json(settings.run_dir / "pipeline.json", {})
+    if pipeline.get("status") == "degraded":
+        st.error("Team pipeline degraded: " + pipeline.get("detail", "integration unavailable"))
+    elif pipeline:
+        st.caption("TEAM PIPELINE · " + pipeline.get("detail", ""))
     if error:
         st.error(f"Data source unavailable ({error}). Showing the last successful snapshot, if any. No fixture fallback.")
     if snapshot is None:
@@ -115,7 +120,7 @@ def live_panels():
         return
     frame = pd.DataFrame(event_rows)
     def color_scan(value):
-        return {"Threat detected": "color: #ff9f9f", "No rule matched": "color: #75e3c3", "Pending scan": "color: #f0d486"}.get(value, "")
+        return {"Threat detected": "color: #ff9f9f", "Scan failed": "color: #ff9f9f", "No rule matched": "color: #75e3c3", "Pending scan": "color: #f0d486"}.get(value, "")
     st.dataframe(frame.style.map(color_scan, subset=["Scan"]), hide_index=True, width="stretch",
         column_config={"Confidence": st.column_config.ProgressColumn(min_value=0, max_value=1, format="%.2f")})
     ids = [r["event"]["event_id"] for r in records]

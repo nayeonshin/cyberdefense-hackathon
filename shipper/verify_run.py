@@ -1,0 +1,63 @@
+"""Acceptance probe for a real controlled run; never mutates pipeline state."""
+import argparse
+import json
+import time
+from datetime import datetime, timezone
+
+from .model import parse_time
+from .settings import Settings
+from .storage import read_json, read_jsonl, write_json
+
+
+def inspect_run(settings):
+    records = read_json(settings.run_dir / "events.json", [])
+    findings = read_json(settings.run_dir / "scan-findings.json", {})
+    receipts = read_jsonl(settings.run_dir / "actions.jsonl")
+    check = read_json(settings.run_dir / "target-check.json", {})
+    heartbeat = read_json(settings.run_dir / "heartbeat.json", {})
+    if not records or not findings.get("findings"):
+        return None
+    event, meta = records[0]["event"], records[0]["metadata"]
+    sent = [r for r in receipts if r["action"] == "mock_registrar" and r["status"] == "SENT" and not r["dry_run"]]
+    confirmed = [r for r in receipts if r["status"] == "CONFIRMED_DOWN" and not r["dry_run"]]
+    if len(sent) > 1:
+        raise RuntimeError("Duplicate controlled dispatch detected")
+    checked = parse_time(check.get("checked_at"))
+    fresh = checked and (datetime.now(timezone.utc) - checked).total_seconds() < 15
+    if (not sent or not confirmed or not fresh or check.get("http_status") != 410
+        or check.get("started_at") != heartbeat.get("started_at")):
+        return None
+    if findings["event_id"] != event["event_id"] or meta.get("scanner") != "semgrep":
+        raise RuntimeError("Scan evidence does not match the event")
+    elapsed = (parse_time(confirmed[0]["created_at"]) - parse_time(meta["ingested_at"])).total_seconds()
+    return {"run_id": settings.run_id, "event_id": event["event_id"], "controlled": True,
+        "scanner": "semgrep", "findings": len(findings["findings"]), "submitted_receipts": len(sent),
+        "confirmed_suspension": True, "http_status": 410, "elapsed_seconds": round(elapsed, 3),
+        "within_recording_window": 0 <= elapsed <= 180, "data_source": settings.source,
+        "clickhouse_verified": settings.source == "clickhouse", "checked_at": check["checked_at"]}
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--wait", type=int, default=150)
+    parser.add_argument("--output")
+    args = parser.parse_args()
+    settings = Settings.from_env()
+    if settings.mode != "controlled" or settings.source == "fixtures":
+        raise SystemExit("A real controlled run is required")
+    deadline = time.monotonic() + args.wait
+    while time.monotonic() < deadline:
+        result = inspect_run(settings)
+        if result:
+            if not result["within_recording_window"]:
+                raise SystemExit("Controlled run exceeded 180 seconds")
+            if args.output:
+                write_json(args.output, result)
+            print(json.dumps(result, indent=2))
+            return
+        time.sleep(2)
+    raise SystemExit("Controlled run did not reach a fresh confirmed suspension within the wait limit")
+
+
+if __name__ == "__main__":
+    main()

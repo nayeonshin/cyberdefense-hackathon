@@ -1,2 +1,3 @@
 -r requirements.txt
+-r requirements-team.txt
 pytest==9.1.1

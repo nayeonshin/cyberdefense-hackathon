@@ -3,7 +3,8 @@
 ## Build and publish
 
 The `container.yml` workflow tests on Linux, builds `linux/amd64`, smoke-tests Streamlit, checks the `/data`
-volume across restart, and pushes `ghcr.io/nayeonshin/cyberdefense-hackathon:<full-commit-sha>`.
+volume across restart, runs actual controlled Semgrep-to-Actor verification, and pushes
+`ghcr.io/nayeonshin/cyberdefense-hackathon:<full-commit-sha>`. It saves a controlled-pipeline-evidence artifact.
 Set the GHCR package to **public** after the first successful push. Verify an unauthenticated image pull
 before deploying; a public GitHub repository does not automatically make its first GHCR package public.
 
@@ -15,7 +16,7 @@ docker compose up --build
 ```
 
 Do not deploy until the workflow or local image smoke test has passed. The base Python version and direct
-dependencies are pinned. Add real team dependencies before using the image as an integrated pipeline.
+dependencies are pinned. Team Python dependencies are included in `requirements-team.txt`.
 
 ## Akash Console
 
@@ -28,8 +29,10 @@ dependencies are pinned. Add real team dependencies before using the image as an
 4. In New deployment, use the custom SDL editor and the contents of `deploy.private.yaml`.
 5. Review the provider quote and credit balance. Use one replica and preserve the named persistent volume.
    The SDL bid is an upper bidding bound, not a promised price. Console's actual quote is authoritative.
-6. Deploy the labeled preview first if teammate modules are still pending. Switch to controlled mode only
-   after setting the real ClickHouse variables and teammate commands and publishing the integrated image.
+6. The default SDL starts a labeled preview. For the real owned-target run, use the integrated image,
+   DATA_SOURCE=files, RUN_MODE=controlled, a new RUN_ID, and
+   `TEAM_PIPELINE_COMMAND_JSON=["python","-m","shipper.team_pipeline"]`.
+   File mode demonstrates actual Semgrep and Actor execution but not ClickHouse.
 7. Save DSEQ, provider, public URL, image digest, and deployment screenshot. Put nonsecret metadata in
    `DATA_DIR/deployment.json` using keys `dseq`, `provider`, `url`, `image_digest`, `verified_at`.
 8. Verify public `/_stcore/health`, two live refresh cycles, browser reconnect, worker heartbeat, and a real
@@ -44,8 +47,10 @@ The dashboard is public and read-only: do not ingest sensitive private evidence 
 
 ## Controlled mode
 
-Set `DATA_SOURCE=clickhouse`, `RUN_MODE=controlled`, a unique `RUN_ID`, ClickHouse variables, and the two
-team commands. The supervisor launches ingestion/scanning/worker/UI independently; all integrations must
+For a reachable external database, set `DATA_SOURCE=clickhouse`, `EVENTS_TABLE=shipper_events`,
+`RUN_MODE=controlled`, a unique `RUN_ID`, ClickHouse variables and the combined team command above
+(or the separately provided ingestion/scanning commands, never both). The supervisor launches the team
+pipeline, worker and UI independently; all integrations must
 retry startup dependencies. External action flags are forced off. The private registrar's state survives restarts.
 
 To stop dispatch, create the Actor's `STOP` file or set `ACTOR_STOP=1` and restart. Stopping the supervisor

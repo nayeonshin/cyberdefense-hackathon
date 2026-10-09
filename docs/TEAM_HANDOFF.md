@@ -4,10 +4,20 @@
 
 | Owner | Required handoff | State |
 |---|---|---|
-| Member 1 | Long-running ingestion argv, ClickHouse connection, schema/view | Pending |
-| Member 2 | Long-running scanner argv, pinned dependencies, real Semgrep rules, Guild AI run evidence | Pending |
+| Member 1 | Ingestion code/schema; reachable ClickHouse connection | Code integrated; instance is localhost-only |
+| Member 2 | Scanner, dependencies, real rules, Guild AI run evidence | Python scanner/rules integrated; Guild trace pending |
 | Member 3 | Actor dispatch/recheck, receipt contract | Original two commits integrated |
 | Member 4 | Dashboard, coordinator, persistent controlled registrar, Docker, Akash, demo assets | Implemented here; see validation status |
+
+## Integrated snapshots
+
+- `ingest.py`: `feature/clickhouse-ingest` at `9f0ec40ed47acaf3e6185436c4a2a74772df1fbe`.
+- `brain/` and `semgrep-rules/`: `timothy` at `3e55a3ecaeef1ab1a2bbd96c93852ce92bf80bd7`.
+- Team modules are copied unchanged; Member 4 integration is in `shipper/team_pipeline.py`.
+- [Controlled run guide](CONTROLLED_RUN.md): combined supervised command, current
+  database adapter, actual Semgrep execution and sponsor evidence limits.
+- The combined adapter handles only the owned target. Member 1's public-feed
+  CLI remains separate and is not automatically started by this demo.
 
 Provide commands as JSON argv arrays, for example `["python", "-m", "your_actual_module"]` in
 `INGEST_COMMAND_JSON` and `SCAN_COMMAND_JSON`. These are **long-running** supervised processes.
@@ -16,8 +26,8 @@ Add pinned dependencies to `requirements-team.txt` and commit the modules before
 
 The controlled registrar becomes available at `http://localhost:8099/site` after worker startup.
 Ingestion must retry startup connections and tag its rows with the configured `RUN_ID`.
-Member 2 must actually fetch and scan this owned page with Semgrep. The bundled form contains a password
-field posting to `/collect`, but stores nothing. Its presence alone is not proof of real-world phishing;
+Member 2 must actually fetch and scan this owned page with Semgrep. The bundled form contains a disabled password
+field with a reserved `.invalid` action, but stores nothing. Its presence alone is not proof of real-world phishing;
 label the rule as a controlled demonstration rule and report its actual output.
 
 ## Contract (exactly these keys)

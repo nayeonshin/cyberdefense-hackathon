@@ -18,6 +18,11 @@ def main():
         command = command_from_env(env)
         if command:
             commands[name] = command
+    pipeline_command = command_from_env("TEAM_PIPELINE_COMMAND_JSON")
+    if pipeline_command:
+        if "ingestion" in commands or "scanner" in commands:
+            raise ValueError("Use either the combined team adapter or separate team commands")
+        commands["team_pipeline"] = pipeline_command
     children = {}
     stopping = False
 
@@ -41,7 +46,8 @@ def main():
             if not stopping:
                 try:
                     write_json(settings.run_dir / "supervisor.json", {"status": "running", "processes": list(children),
-                        "updated_at": now_iso(), "missing": [n for n in ("ingestion", "scanner") if n not in children]})
+                        "updated_at": now_iso(), "missing": [] if "team_pipeline" in children else
+                        [n for n in ("ingestion", "scanner") if n not in children]})
                 except PermissionError:
                     print("Supervisor heartbeat temporarily locked; services continue running.", flush=True)
                 time.sleep(1)

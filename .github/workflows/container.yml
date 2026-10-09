@@ -32,16 +32,29 @@ jobs:
           tags: ghcr.io/nayeonshin/cyberdefense-hackathon:${{ github.sha }}
       - name: Container smoke and persistence test
         run: |
-          docker run -d --name demo -p 8501:8501 -v demo-data:/data ghcr.io/nayeonshin/cyberdefense-hackathon:${{ github.sha }}
+          docker run -d --name demo -p 8501:8501 -v demo-data:/data \
+            -e DATA_SOURCE=files -e RUN_MODE=controlled -e RUN_ID=ci-controlled \
+            -e 'TEAM_PIPELINE_COMMAND_JSON=["python","-m","shipper.team_pipeline"]' \
+            ghcr.io/nayeonshin/cyberdefense-hackathon:${{ github.sha }}
           for attempt in $(seq 1 30); do
             if curl -fsS http://localhost:8501/_stcore/health; then break; fi
             sleep 2
           done
           curl -fsS http://localhost:8501/_stcore/health
-          docker exec demo python -c "from pathlib import Path; Path('/data/persistence-check').write_text('retained')"
+          docker exec demo python -m shipper.verify_run --wait 150 --output /data/verification.json
           docker restart demo
-          docker exec demo python -c "from pathlib import Path; assert Path('/data/persistence-check').read_text() == 'retained'"
+          docker exec demo python -m shipper.verify_run --wait 45 --output /data/verification-after-restart.json
+          mkdir -p controlled-evidence
+          docker cp demo:/data/verification.json controlled-evidence/verification.json
+          docker cp demo:/data/verification-after-restart.json controlled-evidence/verification-after-restart.json
+          for file in events.json scan-findings.json actions.jsonl target-check.json; do
+            docker cp demo:/data/runs/ci-controlled/$file controlled-evidence/$file
+          done
           docker logs demo
           docker stop demo
+      - uses: actions/upload-artifact@v4
+        with:
+          name: controlled-pipeline-evidence
+          path: controlled-evidence/
       - name: Push verified image
         run: docker push ghcr.io/nayeonshin/cyberdefense-hackathon:${{ github.sha }}

