@@ -12,10 +12,10 @@ import os
 from typing import Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from .decide import PENDING
-from .pipeline import process_event
+from .pipeline import process_event, process_events, summarize
 from .scan import ScanError
 
 app = FastAPI(title="Threat brain", version="0.1.0")
@@ -52,6 +52,18 @@ class ScanResult(Event):
     findings: list[FindingOut] = []
 
 
+MAX_BATCH = 25
+
+
+class BatchRequest(BaseModel):
+    events: list[Event] = Field(min_length=1, max_length=MAX_BATCH)
+
+
+class BatchResult(BaseModel):
+    results: list[ScanResult]
+    summary: dict
+
+
 def require_api_key(x_api_key: Optional[str] = Header(default=None)) -> None:
     expected = os.environ.get("BRAIN_API_KEY")
     if not expected:
@@ -82,3 +94,24 @@ def scan(event: Event) -> dict:
     except ScanError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return {**result, "findings": [f.to_dict() for f in findings]}
+
+
+@app.post(
+    "/scan/batch",
+    operation_id="scan_urls",
+    summary="Scan up to 25 URLs in one call, such as the pages of one site, and return a verdict for each",
+    response_model=BatchResult,
+    dependencies=[Depends(require_api_key)],
+)
+def scan_batch(batch: BatchRequest) -> dict:
+    """Results come back in request order, with counts by status in `summary`."""
+    payloads = [event.model_dump() for event in batch.events]
+    listed = [payload.pop("listed_on_feed") for payload in payloads]
+    try:
+        pairs = process_events(payloads, listed)
+    except ScanError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {
+        "results": [{**event, "findings": [f.to_dict() for f in findings]} for event, findings in pairs],
+        "summary": summarize([event for event, _ in pairs]),
+    }

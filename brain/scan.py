@@ -74,17 +74,30 @@ def _read_lines(path: Path, start: int, end: int) -> str:
 
 def scan_capture(capture: Capture) -> list[Finding]:
     """Return the findings for a capture, highest weight first."""
+    return scan_captures([capture])[0]
+
+
+def scan_captures(captures: list[Capture]) -> list[list[Finding]]:
+    """Scan several captures in one Semgrep run; findings come back in the same order.
+
+    Semgrep takes seconds to start, so one run over many captures is far
+    cheaper than one run each.
+    """
+    if not captures:
+        return []
+    directories = [c.directory.resolve() for c in captures]
     cmd = [
         _semgrep_bin(), "scan",
         "--config", str(RULES_DIR),
         "--json", "--quiet", "--metrics=off",
         "--no-git-ignore",  # captures usually sit in an ignored directory
         "--exclude", MANIFEST,
-        str(capture.directory),
+        *[str(d) for d in directories],
     ]
     env = {**os.environ, "PYTHONUTF8": "1"}
+    timeout = SCAN_TIMEOUT_S + 5 * len(captures)
     try:
-        proc = subprocess.run(cmd, capture_output=True, timeout=SCAN_TIMEOUT_S, env=env)
+        proc = subprocess.run(cmd, capture_output=True, timeout=timeout, env=env)
     except subprocess.TimeoutExpired as exc:
         raise ScanError("semgrep timed out") from exc
     try:
@@ -95,10 +108,14 @@ def scan_capture(capture: Capture) -> list[Finding]:
         messages = "; ".join(e.get("message", "") for e in report.get("errors", []))
         raise ScanError(f"semgrep exited {proc.returncode}: {messages[:500]}")
 
-    findings = []
+    grouped: list[list[Finding]] = [[] for _ in captures]
     for result in report.get("results", []):
         metadata = result["extra"].get("metadata", {})
-        path = Path(result["path"])
+        path = Path(result["path"]).resolve()
+        index = next((i for i, d in enumerate(directories) if path.is_relative_to(d)), None)
+        if index is None:
+            continue
+        capture, findings = captures[index], grouped[index]
         start, end = result["start"]["line"], result["end"]["line"]
         # extra.lines needs a Semgrep login, so read the source ourselves.
         snippet = _read_lines(path, start, end)
@@ -115,5 +132,6 @@ def scan_capture(capture: Capture) -> list[Finding]:
                 snippet=snippet.strip()[:400],
             )
         )
-    findings.sort(key=lambda f: (-f.weight, f.file, f.line))
-    return findings
+    for findings in grouped:
+        findings.sort(key=lambda f: (-f.weight, f.file, f.line))
+    return grouped

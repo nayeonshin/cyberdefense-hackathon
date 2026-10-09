@@ -24,8 +24,63 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ScanResult'
+  /scan/batch:
+    post:
+      operationId: scan_urls
+      summary: Scan up to 25 URLs in one call, such as the pages of one site, and return a verdict for each
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchRequest'
+      responses:
+        '200':
+          description: One result per event, in request order, plus counts by status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchResult'
 components:
   schemas:
+    BatchRequest:
+      type: object
+      required: [events]
+      properties:
+        events:
+          type: array
+          minItems: 1
+          maxItems: 25
+          items:
+            $ref: '#/components/schemas/ScanRequest'
+    BatchSummary:
+      type: object
+      properties:
+        total:
+          type: integer
+        by_status:
+          type: object
+          description: Number of events per action_status
+          additionalProperties:
+            type: integer
+        highest_confidence:
+          type: object
+          properties:
+            event_id:
+              type: string
+            target_url:
+              type: string
+            confidence_score:
+              type: number
+    BatchResult:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScanResult'
+        summary:
+          $ref: '#/components/schemas/BatchSummary'
     ScanRequest:
       type: object
       required: [event_id, target_url, timestamp]

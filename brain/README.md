@@ -40,11 +40,31 @@ curl -X POST localhost:8002/scan -H "content-type: application/json" \
 
 `POST /scan` returns the event plus a `findings` array (rule, category, weight, file, line, snippet), which is outside the shared contract and meant for the abuse notice.
 
+### Batch scans
+
+A site usually has several pages worth checking. Pass them together: the pages
+are fetched in parallel and scanned in a single Semgrep run, which matters
+because Semgrep takes several seconds to start.
+
+```sh
+python -m brain.pipeline https://a.example/ https://a.example/login https://a.example/pay
+
+curl -X POST localhost:8002/scan/batch -H "content-type: application/json"   -d '{"events":[{"event_id":"evt-1","target_url":"https://a.example/","timestamp":"2026-10-09T11:00:00Z"},
+                 {"event_id":"evt-2","target_url":"https://a.example/login","timestamp":"2026-10-09T11:00:00Z"}]}'
+```
+
+`POST /scan/batch` takes 1 to 25 events and returns `results` (one per event, in
+request order, each with its own verdict and `findings`) and a `summary` with
+counts by `action_status` and the highest-confidence event. Each URL is judged
+separately; nothing is merged into a per-site verdict. The caller supplies the
+URLs: the scanner does not crawl links.
+
 From Python:
 
 ```python
-from brain.pipeline import process_event
+from brain.pipeline import process_event, process_events
 event, findings = process_event(event)
+pairs = process_events(events)   # batch: list of (event, findings)
 ```
 
 ## Demo sites

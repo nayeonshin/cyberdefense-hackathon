@@ -8,7 +8,7 @@ import pytest
 from brain import decide as decide_mod
 from brain.decide import FETCH_FAILED, REJECTED, VERIFIED, confidence
 from brain.fetcher import fetch_target
-from brain.pipeline import new_event, process_event
+from brain.pipeline import new_event, process_event, process_events, summarize
 from brain.scan import Finding, ScanError, _semgrep_bin
 
 DEMO_SITES = Path(__file__).resolve().parent.parent / "demo-sites"
@@ -123,3 +123,40 @@ def test_service_requires_api_key_when_set(monkeypatch):
     assert ok.status_code == 200
     assert ok.json()["action_status"] == FETCH_FAILED
     assert client.get("/health").status_code == 200
+
+
+@needs_semgrep
+def test_batch_matches_single_scans_and_keeps_order(demo_server, allow_private):
+    urls = [f"{demo_server}/benign/", "http://127.0.0.1:9/dead", f"{demo_server}/phish/", f"{demo_server}/benign/"]
+    events = [new_event(url) for url in urls]
+    pairs = process_events(events)
+    assert [event["event_id"] for event, _ in pairs] == [event["event_id"] for event in events]
+    assert [event["action_status"] for event, _ in pairs] == [REJECTED, FETCH_FAILED, VERIFIED, REJECTED]
+    # Findings must not leak between captures scanned in the same Semgrep run.
+    assert [len(findings) for _, findings in pairs] == [0, 0, 3, 0]
+    single, _ = process_event(events[2])
+    assert pairs[2][0] == single
+    summary = summarize([event for event, _ in pairs])
+    assert summary["by_status"] == {REJECTED: 2, FETCH_FAILED: 1, VERIFIED: 1}
+    assert summary["highest_confidence"]["event_id"] == events[2]["event_id"]
+
+
+def test_empty_batch():
+    assert process_events([]) == []
+
+
+@needs_semgrep
+def test_service_batch(demo_server, allow_private):
+    from fastapi.testclient import TestClient
+
+    from brain.service import MAX_BATCH, app
+
+    client = TestClient(app)
+    event = {"event_id": "evt-1", "target_url": f"{demo_server}/phish/", "timestamp": "2026-10-09T11:00:00Z"}
+    body = {"events": [event, {**event, "event_id": "evt-2", "target_url": f"{demo_server}/benign/"}]}
+    result = client.post("/scan/batch", json=body).json()
+    assert [r["event_id"] for r in result["results"]] == ["evt-1", "evt-2"]
+    assert [r["action_status"] for r in result["results"]] == [VERIFIED, REJECTED]
+    assert result["summary"]["total"] == 2
+    assert client.post("/scan/batch", json={"events": []}).status_code == 422
+    assert client.post("/scan/batch", json={"events": [event] * (MAX_BATCH + 1)}).status_code == 422
