@@ -55,9 +55,11 @@ Local Docker execution remains unavailable on this laptop during this audit. Lin
 - Tests cover the controlled harmless target. Public threat-feed authenticity, real abuse-provider APIs, external takedowns, scanner false-positive rates and Guild evaluation quality have not been validated by Member 4. External channels are disabled.
 - The integrated scanner is not yet approved here for unrestricted hostile-web crawling. DNS rebinding resistance, redirect/script origin policies and incomplete Semgrep-result handling warrant review by Member 2 before expanding beyond the owned target.
 - Graceful restart, a saved-receipt/state-write interruption and application backup restore are covered. This is not a guarantee against arbitrary disk corruption, provider-volume loss or multi-replica writers. Keep one replica and retain backups.
-- The base Python version and direct dependencies are pinned; the base image is not digest-locked and transitive dependencies are not a hash-locked environment. No OS-package CVE scan was completed in this audit.
+- The Python base image is now pinned by verified digest; direct dependencies are version-pinned, but transitive dependencies are not a hash-locked environment. No OS-package CVE scan was completed in this audit.
 - Proof-link checks validate syntax and known private/local host forms without DNS lookup; they cannot prove that an otherwise valid public hostname will always resolve publicly.
 
 ## QA revision rollout
 
 Pending fresh Linux workflow, tested image digest, and public rollout verification. The currently retained rollback is image `e940bebe6ddb283c697ef19da69525900f626830`, digest `sha256:91714aed78a3d7a056a255ad102faea5715274425dd4ba408a77a6ad4a074c35`.
+
+Initial QA CI attempts passed Python tests but hit repeated Docker Hub authorization timeouts/504 responses while fetching the base image or BuildKit. CI now uses Docker's built-in builder and Google's [documented public Docker Hub cache](https://docs.cloud.google.com/artifact-registry/docs/pull-cached-dockerhub-images). The Python base digest was checked against both the official registry and cache; the ClickHouse digest is unchanged. Only the ephemeral CI daemon configuration changes.
