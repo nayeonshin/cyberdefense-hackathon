@@ -79,6 +79,29 @@ def test_future_ingestion_does_not_inflate_current_throughput(tmp_path):
     assert metrics["ingested_per_minute"] == 1
 
 
+def test_acceptance_waits_for_worker_recovery(tmp_path):
+    import json
+    from actor.contract import Receipt
+    from shipper.verify_run import inspect_run
+    from tests.test_shipper import config, record
+    settings = config(tmp_path)
+    item = record(settings)  # Supplied unit-test data, not sponsor scan evidence.
+    event = item["event"]
+    write_json(settings.run_dir / "events.json", [item])
+    write_json(settings.run_dir / "scan-findings.json", {"event_id": event["event_id"], "findings": ["supplied test finding"]})
+    rows = [Receipt(event["event_id"], event["target_url"], "localhost", action, 2, "test", status,
+                    dry_run=False).to_dict() for action, status in [("mock_registrar", "SENT"), ("confirm", "CONFIRMED_DOWN")]]
+    (settings.run_dir / "actions.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    start = now_iso()
+    write_json(settings.run_dir / "target-check.json", {"checked_at": now_iso(), "started_at": start, "http_status": 410})
+    heartbeat = {"started_at": start, "status": "degraded"}
+    write_json(settings.run_dir / "heartbeat.json", heartbeat)
+    assert inspect_run(settings) is None
+    heartbeat["status"] = "running"
+    write_json(settings.run_dir / "heartbeat.json", heartbeat)
+    assert inspect_run(settings)["submitted_receipts"] == 1
+
+
 def test_crash_after_receipt_before_recheck_state_recovers(tmp_path, monkeypatch):
     from shipper.controlled import start_registrar
     from shipper.data import FileSource

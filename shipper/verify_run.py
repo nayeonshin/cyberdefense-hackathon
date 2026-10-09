@@ -14,6 +14,8 @@ def inspect_run(settings, previous_started_at=None):
     receipts = read_jsonl(settings.run_dir / "actions.jsonl")
     check = read_json(settings.run_dir / "target-check.json", {})
     heartbeat = read_json(settings.run_dir / "heartbeat.json", {})
+    if heartbeat.get("status") != "running":
+        return None  # A recent saved check alone does not prove worker recovery.
     if previous_started_at and heartbeat.get("started_at") == previous_started_at:
         return None  # Wait for this restart's worker, not the old files on disk.
     if not records or not findings.get("findings"):
