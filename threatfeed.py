@@ -143,6 +143,7 @@ def update_takedown_status(
     *,
     domain: str | None = None,
     event_id: str | None = None,
+    client=None,
 ) -> int:
     """Set `takedown_status` for every row of `domain`, or for one `event_id`.
 
@@ -170,7 +171,9 @@ def update_takedown_status(
     where = f"{column} = {{selector:String}}"
     params = {"selector": value, "status": status}
 
-    client = _client()
+    owned = client is None
+    if owned:
+        client = _client()
     try:
         matched = int(
             client.query(
@@ -186,7 +189,8 @@ def update_takedown_status(
             settings={"mutations_sync": 1},
         )
     finally:
-        client.close()
+        if owned:
+            client.close()
 
     log.info(
         "update_takedown_status: %s=%r -> %s (%d row(s))", column, value, status, matched
@@ -201,7 +205,7 @@ def get_feed_stats(recent: int = 10) -> dict[str, Any]:
         by_feed       list[{feed_source, rows, pending}]       rows desc
         by_threat_type list[{threat_type, rows}]               rows desc
         by_status     list[{takedown_status, rows}]            rows desc
-        recent_runs   list[{run_ts, feed_source, fetched, inserted, duplicates,
+        recent_runs   list[{run_ts, feed_source, fetched, mapped, inserted, duplicates,
                       error, duration_ms}]  newest first, at most `recent`;
                       [] when the ingest_runs table does not exist yet.
 
@@ -235,7 +239,7 @@ def get_feed_stats(recent: int = 10) -> dict[str, Any]:
         ).first_row[0]
         run_rows = (
             client.query(
-                f"SELECT toUnixTimestamp(run_ts), feed_source, fetched, inserted, "
+                f"SELECT toUnixTimestamp(run_ts), feed_source, fetched, mapped, inserted, "
                 f"duplicates, error, duration_ms FROM {runs} "
                 f"ORDER BY run_ts DESC, feed_source LIMIT {{n:UInt32}}",
                 parameters={"n": recent},
@@ -257,12 +261,13 @@ def get_feed_stats(recent: int = 10) -> dict[str, Any]:
                 "run_ts": _utc(ts),
                 "feed_source": feed,
                 "fetched": int(fetched),
+                "mapped": int(mapped),
                 "inserted": int(inserted),
                 "duplicates": int(dups),
                 "error": err,
                 "duration_ms": int(ms),
             }
-            for ts, feed, fetched, inserted, dups, err, ms in run_rows
+            for ts, feed, fetched, mapped, inserted, dups, err, ms in run_rows
         ],
     }
 

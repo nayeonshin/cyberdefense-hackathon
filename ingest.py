@@ -249,6 +249,7 @@ def connect_clickhouse() -> clickhouse_connect.driver.client.Client:
         username=user,
         password=password,
         secure=secure,
+        database=os.getenv("CLICKHOUSE_DATABASE", "default"),
     )
     log.info("Connected to ClickHouse server version %s", client.server_version)
     return client
@@ -509,6 +510,8 @@ def select_records(
     threat_type: str = DEFAULT_THREAT_TYPE,
 ) -> list[Any]:
     """Apply the `threat_type` filter (D2), then take the first `limit` records."""
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+        raise ValueError("limit must be a positive integer")
     filtered = [
         record
         for record in records
@@ -680,7 +683,12 @@ def map_openphish(raw: Sequence[Any]) -> list[tuple[Any, ...]]:
     for item in raw:
         url = str(item.get("url") or "").strip() if isinstance(item, dict) else ""
         fetched_at = item.get("fetched_at") if isinstance(item, dict) else None
-        host = _host_of(url, is_url=True) if url else ""
+        if isinstance(fetched_at, datetime):
+            fetched_at = (fetched_at.replace(tzinfo=timezone.utc) if fetched_at.tzinfo is None
+                          else fetched_at.astimezone(timezone.utc))
+        else:
+            fetched_at = parse_timestamp(fetched_at)
+        host = _http_host(url)
         if (
             not host
             or not url.lower().startswith(("http://", "https://"))
@@ -726,6 +734,8 @@ def _fetch_threatfox(limit: int) -> list[Any]:
     except ValueError as exc:
         raise RuntimeError(f"ThreatFox returned non-JSON content: {exc}") from exc
 
+    if not isinstance(payload, dict):
+        raise RuntimeError("ThreatFox returned a non-object JSON payload")
     if payload.get("query_status") != "ok" or not isinstance(payload.get("data"), list):
         raise RuntimeError(
             f"ThreatFox query_status={payload.get('query_status')!r}, "
@@ -765,7 +775,7 @@ def map_threatfox(raw: Sequence[Any]) -> list[tuple[Any, ...]]:
 
         if ioc_type == "url":
             target_url = value
-            domain = _host_of(value, is_url=True)
+            domain = _http_host(value)
             ip = domain if is_ip_literal(domain) else ""
         elif ioc_type == "domain":
             domain = _host_of(value)
@@ -773,11 +783,13 @@ def map_threatfox(raw: Sequence[Any]) -> list[tuple[Any, ...]]:
             ip = domain if is_ip_literal(domain) else ""
         elif ioc_type == "ip:port":
             host, _, port = value.rpartition(":")
-            if not is_ip_literal(host) or not port.isdigit():
+            host = host.removeprefix("[").removesuffix("]")
+            if not is_ip_literal(host) or not port.isascii() or not port.isdigit() or not 1 <= int(port) <= 65535:
                 skipped += 1
                 continue
             domain, ip = host, host
-            target_url = f"http://{host}:{port}"
+            authority = f"[{host}]" if ":" in host else host
+            target_url = f"http://{authority}:{port}"
         else:
             skipped += 1
             continue
@@ -810,14 +822,31 @@ def map_threatfox(raw: Sequence[Any]) -> list[tuple[Any, ...]]:
     return rows
 
 
+def _http_host(url: str) -> str:
+    """Return the host only for an HTTP(S) URL with a valid port."""
+    try:
+        parsed = urlsplit(url)
+        if parsed.scheme.lower() not in {"http", "https"}:
+            return ""
+        port = parsed.port
+        if port is not None and not 1 <= port <= 65535:
+            return ""
+    except ValueError:
+        return ""
+    return _host_of(url, is_url=True)
+
+
+def _map_candidates(name, mapper, raw):
+    rows = mapper(raw)
+    if raw and not rows:
+        raise NothingMappedError(f"{name}: mapped 0/{len(raw)} candidate records")
+    return rows
+
+
 FEEDS: dict[str, Feed] = {
     "urlhaus": Feed("urlhaus", _fetch_urlhaus, _map_urlhaus, min_interval=300),
-    "openphish": Feed(
-        "openphish", _fetch_openphish, lambda raw, _a: map_openphish(raw), min_interval=600
-    ),
-    "threatfox": Feed(
-        "threatfox", _fetch_threatfox, lambda raw, _a: map_threatfox(raw), min_interval=600
-    ),
+    "openphish": Feed("openphish", _fetch_openphish, lambda raw, _a: _map_candidates("OpenPhish", map_openphish, raw), min_interval=600),
+    "threatfox": Feed("threatfox", _fetch_threatfox, lambda raw, _a: _map_candidates("ThreatFox", map_threatfox, raw), min_interval=600),
 }
 DEFAULT_FEEDS = "urlhaus"
 
@@ -827,7 +856,7 @@ def parse_feed_names(spec: str) -> list[str]:
     names = [n.strip().lower() for n in spec.split(",") if n.strip()]
     if not names:
         raise ValueError("--feeds must not be empty")
-    if "all" in names:
+    if names == ["all"]:
         return list(FEEDS)
     unknown = [n for n in names if n not in FEEDS]
     if unknown:
@@ -1404,7 +1433,14 @@ class Scheduler:
     def interval(self, name: str) -> float:
         """Current wait for `name`: base * 2**failures, capped (never below base)."""
         base = self._base[name]
-        return min(base * (2 ** self._failures[name]), max(self._cap, base))
+        ceiling = max(self._cap, base)
+        # Stop doubling at the cap, including after thousands of failed polls.
+        delay = base
+        for _ in range(self._failures[name]):
+            delay = min(delay * 2, ceiling)
+            if delay >= ceiling:
+                break
+        return delay
 
     def due(self) -> list[str]:
         """Feeds whose next run time has arrived, in registration order."""
