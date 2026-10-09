@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Preflight for Member 1. Answers one question: what is blocking you right now?
 
-Read-only: creates nothing, writes nothing, mutates nothing.
+Read-only: creates nothing, writes nothing, mutates nothing. Never prints
+the Auth-Key or the ClickHouse password.
 
     .venv/bin/python check_setup.py
 
@@ -18,16 +19,21 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent
+sys.path.insert(0, str(REPO))
 URLHAUS_PROBE = "https://urlhaus-api.abuse.ch/v1/urls/recent/"
+# Full column set created by `ingest.py` (six brief columns + event_id,
+# feed_source, first_seen).
+EXPECTED_COLUMNS = {
+    "event_id", "target_url", "domain", "ip_address", "timestamp",
+    "threat_type", "takedown_status", "feed_source", "first_seen",
+}
 
 OK = "  [ OK ]"
 WARN = "  [WARN]"
 FAIL = "  [FAIL]"
-MANUAL = "  [ ?? ]"
 
 blockers: list[str] = []
 warnings: list[str] = []
-manual: list[str] = []
 
 
 def say(line: str = "") -> None:
@@ -180,16 +186,23 @@ elif requests is not None:
                 say(f"{OK} live sample keys: {sorted(sample)}")
                 say(f"       date_added = {sample.get('date_added')!r}")
                 say(f"       host       = {sample.get('host')!r}")
-                reported = sample.get("date_added") or ""
-                if reported.endswith("UTC"):
-                    say(f"{FAIL} date_added carries a ' UTC' suffix -- the parser at "
-                        f"ingest.py:46 will SKIP EVERY ROW")
-                    blockers.append(
-                        "date_added format mismatch (trailing ' UTC') -- fix the "
-                        "parser before ingest.py can store anything"
-                    )
+                reported = sample.get("date_added")
+                try:
+                    from ingest import parse_timestamp
+                except ImportError as exc:
+                    say(f"{WARN} could not import ingest.parse_timestamp ({exc})")
+                    warnings.append("parser check skipped (ingest.py not importable)")
                 else:
-                    say(f"{OK} date_added matches the parser's expected format")
+                    parsed = parse_timestamp(reported)
+                    if parsed is None:
+                        say(f"{FAIL} ingest.parse_timestamp cannot parse {reported!r} "
+                            f"-- ingest.py would skip every row (it exits 3)")
+                        blockers.append(
+                            f"date_added format {reported!r} not handled by "
+                            "ingest.parse_timestamp()"
+                        )
+                    else:
+                        say(f"{OK} ingest.parse_timestamp handles it -> {parsed.isoformat()}")
                 if sample.get("url_status"):
                     say(f"       url_status = {sample.get('url_status')!r} "
                         f"(not stored -- tells you whether the site is already dead)")
@@ -225,43 +238,38 @@ if requests is not None and pw:
         if r.status_code != 200:
             say(f"{WARN} incoming_threats does not exist yet (ingest.py creates it)")
         else:
-            cols = [ln.split("\t")[0] for ln in r.text.strip().splitlines() if ln.strip()]
+            cols_types = dict(
+                ln.split("\t")[:2] for ln in r.text.strip().splitlines() if ln.strip()
+            )
+            cols = list(cols_types)
             say(f"{OK} incoming_threats columns: {cols}")
-            required = {"timestamp", "target_url", "domain", "ip_address",
-                        "threat_type", "takedown_status"}
-            absent = sorted(required - set(cols))
-            if absent:
-                say(f"{FAIL} missing vs the Member 1 brief: {absent}")
+            absent = sorted(EXPECTED_COLUMNS - set(cols))
+            extra = sorted(set(cols) - EXPECTED_COLUMNS)
+            if absent or extra:
+                say(f"{FAIL} schema mismatch: missing={absent} unexpected={extra}")
                 blockers.append(
-                    f"schema does not match the brief; missing {absent} "
-                    f"(table is empty, so DROP+recreate is safe)"
+                    f"schema does not match ingest.py (missing {absent}, unexpected "
+                    f"{extra}) -- run `.venv/bin/python ingest.py --reset-schema`"
                 )
+            elif cols_types.get("timestamp") != "DateTime":
+                say(f"{FAIL} `timestamp` is {cols_types.get('timestamp')}, expected DateTime")
+                blockers.append("`timestamp` column is not DateTime -- run ingest.py --reset-schema")
             else:
-                say(f"{OK} matches the Member 1 brief")
+                say(f"{OK} matches the Member 1 brief (all six brief columns, timestamp DateTime)")
 
             r2 = requests.post(
                 f"http://{host}:{port}/",
-                params={"query": "SELECT count() FROM incoming_threats FORMAT TSV"},
+                params={"query": "SELECT count(), countIf(takedown_status = 'PENDING') "
+                                 "FROM incoming_threats FORMAT TSV"},
                 auth=("default", pw), timeout=10,
             )
             if r2.status_code == 200:
-                say(f"{OK} current row count: {r2.text.strip()}")
+                total, pending = (r2.text.strip().split("\t") + ["?"])[:2]
+                say(f"{OK} current row count: {total} ({pending} PENDING)")
+                if total == "0":
+                    warnings.append("incoming_threats is empty -- run ingest.py")
     except requests.RequestException as exc:
         say(f"{WARN} schema check failed: {exc}")
-
-# --------------------------------------------------------------------------- #
-section("5. Decisions I cannot make for you (MEMBER1_PLAN.md section 3)")
-# --------------------------------------------------------------------------- #
-
-for item in (
-    "D1  records per poll: 20 (brief) or 50 (earlier spec)?",
-    "D2  filter to phishing only, or ingest every threat type?",
-    "D3  fill ip_address: leave empty, or opt-in DNS resolution?",
-    "D4  expose get_pending_targets() as a Python import or an HTTP endpoint?",
-    "D5  status write-back: ALTER UPDATE (recommended) or ReplacingMergeTree?",
-):
-    say(f"{MANUAL} {item}")
-    manual.append(item)
 
 # --------------------------------------------------------------------------- #
 say()
@@ -281,7 +289,7 @@ if warnings:
         say(f"  - {w}")
 
 say()
-say(f"{len(manual)} decision(s) still open -- see MEMBER1_PLAN.md section 3")
+say("Decisions D1-D5 are resolved (MEMBER1_PLAN.md section 3).")
 say("=" * 68)
 
 sys.exit(1 if blockers else 0)

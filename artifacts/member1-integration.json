@@ -1,0 +1,38 @@
+{
+  "domain_activity": [
+    {
+      "hour_utc": "2026-10-09T18:00:00+00:00",
+      "domain": "127.0.0.1",
+      "url_count": 1
+    },
+    {
+      "hour_utc": "2026-10-09T19:00:00+00:00",
+      "domain": "127.0.0.1",
+      "url_count": 2
+    }
+  ],
+  "threat_types": [
+    {
+      "threat_type": "phishing",
+      "event_count": 2
+    },
+    {
+      "threat_type": "malware_download",
+      "event_count": 1
+    }
+  ],
+  "scanner_verdicts": [
+    {
+      "action_status": "FETCH_FAILED",
+      "event_count": 1
+    },
+    {
+      "action_status": "REJECTED",
+      "event_count": 1
+    },
+    {
+      "action_status": "VERIFIED",
+      "event_count": 1
+    }
+  ]
+}

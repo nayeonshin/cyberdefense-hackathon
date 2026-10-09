@@ -22,12 +22,15 @@ venv/
 env/
 .Python
 build/
+.pytest_cache/
+captures/
+clickhouse.env
+node_modules/
 dist/
 *.egg-info/
 .eggs/
 
 # --- Tooling / editors -----------------------------------------------------
-.pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
@@ -39,8 +42,6 @@ htmlcov/
 # --- Runtime artifacts -----------------------------------------------------
 *.log
 logs/
-captures/
-node_modules/
 guild.json
 .guild/
 agent.js.gz
