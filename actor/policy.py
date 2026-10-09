@@ -55,7 +55,7 @@ def decide(verdict: Verdict, enrichment: Enrichment, policy: dict,
 
     def add(action, rung, recipient):
         if action in already_done:
-            decision.skipped.append((action, "already done for this domain"))
+            decision.skipped.append((action, "already done for this target"))
         else:
             decision.plans.append(Plan(action, rung, recipient))
 
@@ -118,7 +118,7 @@ def escalation(verdict: Verdict, enrichment: Enrichment, policy: dict,
     if is_controlled(verdict, policy) or is_allowlisted(verdict.host, policy):
         decision.skipped.append(("notify_registrar", "not applicable for this target"))
     elif "notify_registrar" in already_done:
-        decision.skipped.append(("notify_registrar", "already done for this domain"))
+        decision.skipped.append(("notify_registrar", "already done for this target"))
     elif "notify_host" not in already_done:
         decision.skipped.append(("notify_registrar", "host was never notified"))
     elif not enrichment.registrar_abuse:

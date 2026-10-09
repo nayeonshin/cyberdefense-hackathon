@@ -2,7 +2,7 @@
 
 ![Actor bench scorecard](bench/scorecard.svg)
 
-The card above is rewritten by `python -m actor.bench`: 117 labelled scenarios run through the
+The card above is rewritten by `python -m actor.bench`: 119 labelled scenarios run through the
 real dispatcher with every outside channel replaced by a recorder. One safety violation makes
 a run UNSAFE whatever its score. Details are in [bench/scenarios.yaml](bench/scenarios.yaml)
 and `bench/scorecard.html`.
@@ -109,8 +109,22 @@ hosts: 1,000,085,824 rows, 147 GiB raw, 33 GiB stored.
 | `threat_history_scale` | 1,000,085,824 | 4 ms / 5 ms | 8,152 | 69 ms |
 
 All 400 hosts get the same answer from both tables. Quotes, SQL fragments, a null byte and
-a 5,000 character host return an empty record and no error. The last numbers are in
-[bench/stress.json](bench/stress.json).
+a 5,000 character host return an empty record and no error. The numbers of the most recent
+run, which may be a smaller one, are in [bench/stress.json](bench/stress.json).
+
+## Checking decisions by eye
+
+Counts say that nothing forbidden happened. Whether each decision is the right one is a
+question for a person. `python -m actor.review` writes [bench/review.html](bench/review.html)
+from the last stress run: one decision per card, with what was known about the URL on the
+left and what the Actor did on the right. It shows every hostile row and twelve of each
+other kind. `J` marks a card right, `F` wrong, `S` skips, `B` goes back; the cards marked
+wrong are collected as text at the bottom.
+
+The first pass over that page found a gap the counts had missed. A second bad page on the
+same shared platform host, for example another file on `raw.githubusercontent.com`, was
+skipped as already handled, because finished work was tracked per host. On shared platforms
+it is now tracked per URL (scenarios `platform-second-url` and `platform-same-url-again`).
 
 ## Live checks
 

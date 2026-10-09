@@ -91,7 +91,12 @@ def dispatch(verdict, live: bool = False, offline: bool = False,
     record = None if controlled else history.lookup(verdict.host)
     if record and record["urls_on_record"] >= policy["history"]["corroborates_at"]:
         verdict.corroborated = True
-    done = ledger.done_actions(verdict.host) if live else frozenset()
+    if not live:
+        done = frozenset()
+    elif policy_module.is_allowlisted(verdict.host, policy):
+        done = ledger.done_for_url(verdict.target_url)
+    else:
+        done = ledger.done_actions(verdict.host)
     decision = policy_module.decide(verdict, enrichment, policy, done)
 
     receipts = run_plans(verdict, enrichment, decision.plans, live, ledger, policy)

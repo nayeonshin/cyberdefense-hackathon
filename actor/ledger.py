@@ -152,6 +152,16 @@ class Ledger:
                          if r["domain"] == domain and r["status"] in DONE_STATUSES
                          and not r["dry_run"])
 
+    def done_for_url(self, url: str) -> frozenset:
+        """The same for one URL. On a shared platform every page is a case of its own."""
+        rows, start = self.all(), 0
+        for i, r in enumerate(rows):
+            if r["target_url"] == url and r["status"] == "CONFIRMED_DOWN":
+                start = i + 1
+        return frozenset(r["action"] for r in rows[start:]
+                         if r["target_url"] == url and r["status"] in DONE_STATUSES
+                         and not r["dry_run"])
+
     def reported(self, action: str, recipient: str, domain: str) -> bool:
         return any(r["action"] == action and r["recipient"] == recipient
                    and r["status"] in DONE_STATUSES and not r["dry_run"]

@@ -1,18 +1,18 @@
 {
   "pipeline": {
-    "ran_at": "2026-10-09T21:11:37Z",
-    "events": 3023,
-    "handled": 2583,
-    "passes": 13,
-    "seconds": 383.4,
-    "events_per_second": 6.74,
-    "receipts": 10411,
-    "receipts_in_clickhouse": 10411,
-    "requests_recorded": 3679,
-    "mails_recorded": 617,
+    "ran_at": "2026-10-09T21:32:39Z",
+    "events": 423,
+    "handled": 364,
+    "passes": 2,
+    "seconds": 24.3,
+    "events_per_second": 14.96,
+    "receipts": 1467,
+    "receipts_in_clickhouse": 1467,
+    "requests_recorded": 669,
+    "mails_recorded": 94,
     "outcomes": {
-      "PUBLISHED_TAKEDOWN": 2099,
-      "WITHHELD": 484
+      "PUBLISHED_TAKEDOWN": 304,
+      "WITHHELD": 60
     },
     "problems": [],
     "problem_count": 0

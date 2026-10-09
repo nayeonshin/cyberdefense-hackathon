@@ -859,3 +859,20 @@
   verdict: {corroborated: false, target_url: "https://sites.google.com/view/history-on-platform"}
   history: {urls_on_record: 12977}
   expect: url_only
+
+# ---------------------------------------------------------------- added after the database stress run
+- id: platform-second-url
+  group: act
+  title: A second bad page on the same shared platform host is its own case
+  steps:
+    - dispatch: {verdict: {event_id: evt-platform-page-a, target_url: "https://raw.githubusercontent.com/someone/kit/main/a.html"}}
+    - dispatch: {verdict: {event_id: evt-platform-page-b, target_url: "https://raw.githubusercontent.com/another/kit/main/b.html"}}
+  expect: {feed: 2, urlscan: 2, netcraft: 2}
+
+- id: platform-same-url-again
+  group: withhold
+  title: The same platform URL arriving a second time is not reported twice
+  steps:
+    - dispatch: {verdict: {event_id: evt-platform-once, target_url: "https://raw.githubusercontent.com/someone/kit/main/a.html"}}
+    - dispatch: {verdict: {event_id: evt-platform-twice, target_url: "https://raw.githubusercontent.com/someone/kit/main/a.html"}}
+  expect: {feed: 1, urlscan: 1, netcraft: 1}
