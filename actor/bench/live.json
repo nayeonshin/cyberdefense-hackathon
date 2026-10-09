@@ -1,28 +1,28 @@
 {
- "ts": "2026-10-09T20:22:42.984Z",
+ "ts": "2026-10-09T22:34:28.706Z",
  "full": false,
  "checks": [
   {
    "channel": "clickhouse write",
    "provider": "ClickHouse",
    "status": "OK",
-   "latency_ms": 3767,
-   "detail": "insert and count, 10 rows in live_checks",
+   "latency_ms": 1629,
+   "detail": "insert and count, 19 rows in live_checks",
    "proof_url": ""
   },
   {
    "channel": "clickhouse lookup",
    "provider": "ClickHouse",
    "status": "OK",
-   "latency_ms": 1124,
-   "detail": "20 live receipts over 2 domains",
+   "latency_ms": 350,
+   "detail": "65 live receipts over 2 domains",
    "proof_url": ""
   },
   {
    "channel": "scanner",
    "provider": "Semgrep",
    "status": "OK",
-   "latency_ms": 7942,
+   "latency_ms": 5821,
    "detail": "VERIFIED at 0.95, rules: cross-origin-credential-post, fake-login-form, telegram-bot-exfil",
    "proof_url": ""
   },
@@ -30,7 +30,7 @@
    "channel": "urlscan",
    "provider": "urlscan.io",
    "status": "OK",
-   "latency_ms": 2281,
+   "latency_ms": 989,
    "detail": "key accepted, 1/5000 public scans used today; no CONTROLLED_URL to scan",
    "proof_url": ""
   },
@@ -38,7 +38,7 @@
    "channel": "netcraft",
    "provider": "Netcraft",
    "status": "OK",
-   "latency_ms": 2614,
+   "latency_ms": 1090,
    "detail": "development endpoint HTTP 200: {\"message\":\"Successfully reported\",\"uuid\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
    "proof_url": ""
   },
@@ -46,7 +46,7 @@
    "channel": "feed",
    "provider": "GitHub",
    "status": "OK",
-   "latency_ms": 1028,
+   "latency_ms": 644,
    "detail": "feed remote reachable",
    "proof_url": "https://github.com/OutBlade/threat-feed/blob/main"
   },
@@ -62,7 +62,7 @@
    "channel": "mail sink",
    "provider": "local",
    "status": "OK",
-   "latency_ms": 136,
+   "latency_ms": 69,
    "detail": "test mail delivered to the sink",
    "proof_url": "http://localhost:8025"
   }

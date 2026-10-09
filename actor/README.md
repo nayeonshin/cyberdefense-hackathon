@@ -75,7 +75,7 @@ asks ClickHouse what is already on record for the host, and the answer is used t
 The lookup runs on the table's sort key: 66 ms median from a laptop over 822,439 rows.
 
 `python -m actor.insights` prints what the Actor reads from ClickHouse in about three
-seconds: table sizes, the lookup on the real and on the billion-row table side by side, how
+seconds: table sizes, the lookup on the real and on the ten-billion-row table side by side, how
 concentrated the threat is (8.0 % of 444,138 hosts carry 42.9 % of all URLs, and on those
 hosts the history alone is the second source), the top repeat offenders, the shared
 platforms it must not block, and what it would do with every real URL.
@@ -103,16 +103,23 @@ the query string. Then the Actor works the queue off and the database is checked
 
 The first run also showed the cost of one insert per receipt: 0.64 events per second.
 Receipts and outcomes now go to ClickHouse as one insert per pass and the history lookup as
-one query per pass, which brought the same 155 events from 242 s to 10 s.
+one query per pass, which brought the same 155 events from 242 s to 10 s. The final run of
+all 2,583 events took 207 s, 12.5 per second, while the ten-billion-row table was loading on
+the same service.
 
 **History lookup at scale.** `python -m actor.stress lookups` asks for 400 hosts in the
 real table and in `threat_history_scale`, which holds the real rows plus synthetic sibling
-hosts: 1,000,085,824 rows, 147 GiB raw, 33 GiB stored.
+hosts: 10,000,858,240 rows, 1.44 TiB raw, 327 GiB stored. It was built in three steps (1, 5 and
+10 billion rows) and measured at each.
 
 | Table | Rows | Server time, median / p99 | Rows read per lookup | From a laptop, median |
 |---|---|---|---|---|
-| `threat_history` | 822,439 | 4 ms / 5 ms | 14,812 | 77 ms |
-| `threat_history_scale` | 1,000,085,824 | 4 ms / 5 ms | 8,152 | 69 ms |
+| `threat_history` | 822,439 | 4 ms / 9 ms | 10,122 | 68 ms |
+| `threat_history_scale` at 1,000,085,824 | 1,000,085,824 | 4 ms / 5 ms | 8,152 | 69 ms |
+| `threat_history_scale` at 10,000,858,240 | 10,000,858,240 | 6 ms / 117 ms | 8,126 | 69 ms |
+
+The lookup reads one index granule whatever the table size. The p99 on ten billion rows was
+measured two minutes after the load, with 76 parts still merging; its p95 was 7 ms.
 
 All 400 hosts get the same answer from both tables. Quotes, SQL fragments, a null byte and
 a 5,000 character host return an empty record and no error. The numbers of the most recent
@@ -247,6 +254,15 @@ Rehearsed eight times in a row: 30 to 55 s from report to confirmed takedown. Th
 rehearsal showed: an event id that was used before is not scanned again, so every run needs
 a new one (the command picks one); a page that is already down when the scanner arrives
 ends as `FETCH_FAILED`; ticket links stop working when the mock server is restarted.
+
+### The same backend in one container
+
+[deploy/akash-backend.yaml](../deploy/akash-backend.yaml) runs the controlled target, the
+scanner worker, the scanner API and the Actor loop in one stock Python container, on tables of
+their own (`akash_threats`, `akash_events`, `akash_actions`), and reports the controlled target
+to itself every four minutes. Run unchanged in Docker it completed three takedown loops
+unattended (30 s, 20 s, 20 s), and the team's 78 tests pass inside it. Port 80 is the scanner
+API (`POST /scan` with `X-API-Key`), which is the public address a Guild agent needs to call it.
 
 ## Guardrails
 

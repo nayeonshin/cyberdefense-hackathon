@@ -26,7 +26,7 @@ file can wipe the data before the demo. It will be removed after the event.
 | `events` | one current version per event: VERIFIED, PUBLISHED_TAKEDOWN, TAKEN_DOWN | Member 2's scanner and the Actor |
 | `actions` | one receipt per action with proof link and evidence hash | the Actor |
 | `threat_history` | 822,439 real threat URLs | the Actor's history lookup |
-| `threat_history_scale` | 1,000,085,824 rows, scale test with synthetic hosts | scale test |
+| `threat_history_scale` | 10,000,858,240 rows, scale test with synthetic hosts | scale test |
 
 Current state of an event: `SELECT * FROM events FINAL WHERE event_id = '...'`.
 Receipts of an event: `SELECT * FROM actions WHERE event_id = '...' ORDER BY created_at`.
