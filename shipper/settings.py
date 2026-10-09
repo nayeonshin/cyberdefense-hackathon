@@ -20,15 +20,19 @@ class Settings:
     def from_env(cls):
         # Reuse the Actor's dotenv loader, while leaving the Actor itself unchanged.
         from actor import config  # noqa: F401
+        # Member 1 uses this second ignored file; existing process/.env values win.
+        config._load_dotenv(config.ROOT / "clickhouse.env")
         run_id = os.getenv("RUN_ID", "development")
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", run_id):
             raise ValueError("RUN_ID must contain only letters, digits, underscores, or hyphens")
         source = os.getenv("DATA_SOURCE", "fixtures")
         mode = os.getenv("RUN_MODE", "preview")
-        if source not in {"fixtures", "files", "clickhouse"} or mode not in {"preview", "controlled"}:
+        if source not in {"fixtures", "files", "clickhouse", "backend"} or mode not in {"preview", "controlled"}:
             raise ValueError("Invalid DATA_SOURCE or RUN_MODE")
         if source == "fixtures" and mode != "preview":
             raise ValueError("Fixtures may only run in preview mode")
+        if source == "backend" and mode != "preview":
+            raise ValueError("Backend tables are read-only; use RUN_MODE=preview and the backend's own Actor")
         controlled_url = os.getenv("CONTROLLED_TARGET_URL", "http://localhost:8099/site")
         if controlled_url != "http://localhost:8099/site":
             raise ValueError("Controlled mode uses only the bundled private localhost:8099/site target")

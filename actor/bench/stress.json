@@ -1,0 +1,45 @@
+{
+  "pipeline": {
+    "ran_at": "2026-10-09T22:37:50Z",
+    "events": 3023,
+    "handled": 2583,
+    "passes": 13,
+    "seconds": 207.0,
+    "events_per_second": 12.48,
+    "receipts": 10411,
+    "receipts_in_clickhouse": 10411,
+    "requests_recorded": 3825,
+    "mails_recorded": 617,
+    "outcomes": {
+      "PUBLISHED_TAKEDOWN": 2269,
+      "WITHHELD": 314
+    },
+    "problems": [],
+    "problem_count": 0
+  },
+  "lookups": {
+    "problems": [],
+    "threat_history": {
+      "rows": 822439,
+      "lookups": 400,
+      "median_ms": 67.6,
+      "p95_ms": 89.4,
+      "p99_ms": 125.3,
+      "max_ms": 164.4,
+      "parallel_threads": 16,
+      "parallel_per_second": 46.6,
+      "parallel_p95_ms": 111.6
+    },
+    "threat_history_scale": {
+      "rows": 10000858240,
+      "lookups": 400,
+      "median_ms": 68.5,
+      "p95_ms": 76.3,
+      "p99_ms": 85.0,
+      "max_ms": 98.3,
+      "parallel_threads": 16,
+      "parallel_per_second": 48.6,
+      "parallel_p95_ms": 94.4
+    }
+  }
+}

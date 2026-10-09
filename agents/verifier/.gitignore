@@ -1,0 +1,9 @@
+.DS_Store
+.git-credentials
+agent.js.gz
+dist
+guild.json
+node_modules
+tsconfig.tsbuildinfo
+
+.npmrc

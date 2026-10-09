@@ -7,6 +7,11 @@ thresholds:
 
 rate_limit_per_recipient_per_hour: 5
 
+# The ClickHouse history table as a second source: a host with at least this many
+# malicious URLs already on record counts as independently confirmed.
+history:
+  corroborates_at: 3
+
 recheck:
   escalate_after_seconds: 600   # rung 3: tell the registrar if the target is still up
   confirm_failures: 2           # rung 4: consecutive failed checks before "confirmed down"
@@ -55,6 +60,19 @@ allowlist:
   - t.me
   - paypal.com
   - wikipedia.org
+  # Shared platforms that host other people's files under one name. Each was among the
+  # busiest hosts in 822,439 replayed real threat URLs; blocking the name would block
+  # the whole platform.
+  - fleek.co
+  - cloudflare-ipfs.com
+  - cf-ipfs.com
+  - ipfs.io
+  - dweb.link
+  - infura-ipfs.io
+  - siasky.net
+  - genial.ly
+  - googleapis.com
+  - sharepoint.com
 
 # An IP in one of these networks serves many unrelated sites, so it is never
 # reported to an IP reputation list.

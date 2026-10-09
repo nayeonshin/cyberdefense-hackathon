@@ -1,0 +1,7 @@
+{
+  "url": "https://search.example/",
+  "final_url": "https://search.example/",
+  "ok": true,
+  "error": "",
+  "files": {"inline_0.js": "https://search.example/"}
+}

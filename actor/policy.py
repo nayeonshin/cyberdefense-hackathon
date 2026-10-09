@@ -4,8 +4,9 @@ from pathlib import Path
 
 import yaml
 
+from . import config
 from .contract import Verdict
-from .enrich import Enrichment
+from .enrich import Enrichment, is_internal, is_ip
 
 POLICY_PATH = Path(__file__).with_name("policy.yaml")
 
@@ -27,7 +28,10 @@ class Decision:
 
 
 def load(path: Path = POLICY_PATH) -> dict:
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
+    policy = yaml.safe_load(path.read_text(encoding="utf-8"))
+    extra = [h.strip().lower() for h in config.get("CONTROLLED_HOSTS").split(",") if h.strip()]
+    policy["controlled_hosts"] = policy["controlled_hosts"] + extra
+    return policy
 
 
 def is_allowlisted(host: str, policy: dict) -> bool:
@@ -51,7 +55,7 @@ def decide(verdict: Verdict, enrichment: Enrichment, policy: dict,
 
     def add(action, rung, recipient):
         if action in already_done:
-            decision.skipped.append((action, "already done for this domain"))
+            decision.skipped.append((action, "already done for this target"))
         else:
             decision.plans.append(Plan(action, rung, recipient))
 
@@ -65,6 +69,10 @@ def decide(verdict: Verdict, enrichment: Enrichment, policy: dict,
     if is_controlled(verdict, policy):
         add("mock_registrar", 2, "mock-registrar")
         add("notify_host", 2, "abuse@mock-registrar.test")
+        return decision
+
+    if is_ip(verdict.host) and is_internal(verdict.host):
+        decision.skipped.append(("all", "target address is not public"))
         return decision
 
     allowlisted = is_allowlisted(verdict.host, policy)
@@ -83,6 +91,8 @@ def decide(verdict: Verdict, enrichment: Enrichment, policy: dict,
         decision.skipped.append(("abuseipdb", "allowlisted platform, URL-level reports only"))
     elif not enrichment.ips:
         decision.skipped.append(("abuseipdb", "host does not resolve"))
+    elif is_internal(enrichment.ips[0]):
+        decision.skipped.append(("abuseipdb", "host resolves to an address that is not public"))
     elif is_shared_infra(enrichment, policy):
         decision.skipped.append(("abuseipdb", f"shared infrastructure ({enrichment.host_network})"))
     else:
@@ -108,7 +118,7 @@ def escalation(verdict: Verdict, enrichment: Enrichment, policy: dict,
     if is_controlled(verdict, policy) or is_allowlisted(verdict.host, policy):
         decision.skipped.append(("notify_registrar", "not applicable for this target"))
     elif "notify_registrar" in already_done:
-        decision.skipped.append(("notify_registrar", "already done for this domain"))
+        decision.skipped.append(("notify_registrar", "already done for this target"))
     elif "notify_host" not in already_done:
         decision.skipped.append(("notify_registrar", "host was never notified"))
     elif not enrichment.registrar_abuse:

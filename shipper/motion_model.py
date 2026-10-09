@@ -1,7 +1,7 @@
 """Read-only, evidence-derived input for the motion overview."""
 from datetime import datetime, timezone
 
-from .model import defang, parse_time, receipt_label, scan_label
+from .model import defang, parse_time, receipt_label, scan_complete, scan_label
 from .presentation import timestamp_label
 
 
@@ -24,9 +24,9 @@ def motion_state(record, receipts, *, simulated=False, historical=False, degrade
     ingested = _recorded(meta.get("ingested_at"), now)
     scanned = _recorded(meta.get("scan_completed_at"), now)
     scan = scan_label(event, meta)
-    if scan != "Scan failed" and not scanned:
+    if scan != "Scan failed" and not scanned and not meta.get("scan_completed"):
         scan = "Pending scan" if not meta.get("scan_completed_at") else "Scan metadata unavailable"
-    scan_ok = bool(scanned and scan in {"Threat detected", "No rule matched"})
+    scan_ok = bool(scan_complete(meta) and scan in {"Threat detected", "No rule matched"})
     matching = sorted((r for r in receipts if r.get("event_id") == event["event_id"]
                        and r.get("target_url") == event["target_url"]
                        and r.get("dry_run") is False and _recorded(r.get("created_at"), now)),
@@ -54,6 +54,7 @@ def motion_state(record, receipts, *, simulated=False, historical=False, degrade
                   parse_time(sent["created_at"]) if sent else None,
                   parse_time(confirmed["created_at"]) if confirmed else None]
     reached = [bool(t) for t in timestamps]
+    reached[1] = scan_ok
     details = [timestamp_label(ingested), scan,
                "Submitted" if sent else ("Not applicable" if negative else receipt_label(last) if last else "Awaiting receipt"),
                status if confirmed else ("Not applicable" if negative else "Awaiting confirmation")]

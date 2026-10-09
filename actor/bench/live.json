@@ -1,0 +1,70 @@
+{
+ "ts": "2026-10-09T22:34:28.706Z",
+ "full": false,
+ "checks": [
+  {
+   "channel": "clickhouse write",
+   "provider": "ClickHouse",
+   "status": "OK",
+   "latency_ms": 1629,
+   "detail": "insert and count, 19 rows in live_checks",
+   "proof_url": ""
+  },
+  {
+   "channel": "clickhouse lookup",
+   "provider": "ClickHouse",
+   "status": "OK",
+   "latency_ms": 350,
+   "detail": "65 live receipts over 2 domains",
+   "proof_url": ""
+  },
+  {
+   "channel": "scanner",
+   "provider": "Semgrep",
+   "status": "OK",
+   "latency_ms": 5821,
+   "detail": "VERIFIED at 0.95, rules: cross-origin-credential-post, fake-login-form, telegram-bot-exfil",
+   "proof_url": ""
+  },
+  {
+   "channel": "urlscan",
+   "provider": "urlscan.io",
+   "status": "OK",
+   "latency_ms": 989,
+   "detail": "key accepted, 1/5000 public scans used today; no CONTROLLED_URL to scan",
+   "proof_url": ""
+  },
+  {
+   "channel": "netcraft",
+   "provider": "Netcraft",
+   "status": "OK",
+   "latency_ms": 1090,
+   "detail": "development endpoint HTTP 200: {\"message\":\"Successfully reported\",\"uuid\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+   "proof_url": ""
+  },
+  {
+   "channel": "feed",
+   "provider": "GitHub",
+   "status": "OK",
+   "latency_ms": 644,
+   "detail": "feed remote reachable",
+   "proof_url": "https://github.com/OutBlade/threat-feed/blob/main"
+  },
+  {
+   "channel": "controlled target",
+   "provider": "Akash",
+   "status": "SKIP",
+   "latency_ms": 0,
+   "detail": "CONTROLLED_URL not set (the test page hosted on Akash)",
+   "proof_url": ""
+  },
+  {
+   "channel": "mail sink",
+   "provider": "local",
+   "status": "OK",
+   "latency_ms": 69,
+   "detail": "test mail delivered to the sink",
+   "proof_url": "http://localhost:8025"
+  }
+ ]
+}

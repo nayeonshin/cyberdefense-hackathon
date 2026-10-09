@@ -1,0 +1,10 @@
+[
+  {
+    "event_id": "demo-0001",
+    "target_url": "http://localhost:8099/site/",
+    "timestamp": "2026-10-09 19:40:00",
+    "threat_type": "phishing",
+    "feed_source": "controlled-demo",
+    "takedown_status": "PENDING"
+  }
+]

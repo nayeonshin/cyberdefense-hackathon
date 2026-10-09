@@ -1,0 +1,41 @@
+---
+# Controlled target for the on-stage loop: a harmless lookalike page plus mock registrar.
+# Import in Akash Console (New deployment > Import SDL). The service needs no build:
+# a stock Python image runs one file from this repository, pinned to a commit.
+version: "2.0"
+services:
+  target:
+    image: python:3.12-slim
+    env:
+      - HOST=0.0.0.0
+      - PORT=8099
+    command:
+      - python
+      - -c
+      - "import urllib.request as u; exec(u.urlopen('https://raw.githubusercontent.com/nayeonshin/cyberdefense-hackathon/9cb856f3a4a547c6bca5505fb64ed11ab6b84be7/actor/mock_registrar_server.py').read())"
+    expose:
+      - port: 8099
+        as: 80
+        to:
+          - global: true
+profiles:
+  compute:
+    target:
+      resources:
+        cpu:
+          units: 0.5
+        memory:
+          size: 512Mi
+        storage:
+          size: 1Gi
+  placement:
+    akash:
+      pricing:
+        target:
+          denom: uact
+          amount: 10000
+deployment:
+  target:
+    akash:
+      profile: target
+      count: 1

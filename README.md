@@ -27,6 +27,7 @@ For Docker, run `docker compose up --build` (Linux containers). The named volume
 - [Member 3 Actor documentation](actor/README.md)
 - [Full QA findings and validation](docs/QA_REPORT.md)
 - [Animated overview and rollout validation](docs/MOTION_ROLLOUT.md)
+- [Frontend/backend integration and native ClickHouse setup](docs/FRONTEND_BACKEND_INTEGRATION.md)
 
 ```mermaid
 flowchart LR
@@ -61,7 +62,8 @@ see [current deployment evidence](docs/RAMP_ROLLOUT.md) for its URL, expiry and 
 
 The original two Actor commits and snapshots of Member 1's ingestion and Member 2's Python scanner are
 integrated without modifying their files. The controlled adapter supplies a long-running entrypoint;
-Member 1's ClickHouse is currently localhost-only and Guild run traces remain pending.
+The native backend tables can be connected through `DATA_SOURCE=backend`; see the integration guide above.
+Guild AI is not used.
 No API credentials or sponsor redemption codes belong in Git.
 `RUN_MODE=controlled` is deliberately limited to the private harmless target. Third-party reporting switches
 are forced off for this demo; configure general live operation with Member 3 separately.

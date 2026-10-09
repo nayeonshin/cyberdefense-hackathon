@@ -4,7 +4,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from .model import FIELDS, parse_time, validate_event
+from .model import FIELDS, parse_time, scan_complete, validate_event
 from .storage import read_json, read_jsonl
 
 
@@ -14,8 +14,8 @@ def calculate_metrics(records, receipts):
     times = [parse_time(r["metadata"].get("ingested_at")) for r in records]
     return {"ingested_per_minute": sum(t is not None and cutoff <= t <= now for t in times),
             "total_events": len(records),
-            "pending_scans": sum(not r["metadata"].get("scan_completed_at") for r in records),
-            "detected": sum(r["event"]["semgrep_detected"] and bool(r["metadata"].get("scan_completed_at")) for r in records),
+            "pending_scans": sum(not scan_complete(r["metadata"]) for r in records),
+            "detected": sum(r["event"]["semgrep_detected"] and scan_complete(r["metadata"]) for r in records),
             "submitted_actions": sum(r.get("status") == "SENT" and not r.get("dry_run", True) for r in receipts)}
 
 
@@ -120,4 +120,7 @@ class ClickHouseSource:
 
 
 def make_source(settings):
+    if settings.source == "backend":
+        from .backend_source import BackendSource
+        return BackendSource(settings)
     return {"fixtures": FixtureSource, "files": FileSource, "clickhouse": ClickHouseSource}[settings.source](settings)
