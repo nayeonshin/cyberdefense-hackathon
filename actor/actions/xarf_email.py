@@ -10,6 +10,7 @@ from email.utils import formatdate, make_msgid
 from pathlib import Path
 
 from .. import config
+from ..contract import safe_id
 from ..evidence import defang, for_people
 from . import Context, Outcome
 
@@ -91,7 +92,8 @@ def execute(ctx: Context) -> Outcome:
     outbox = Path(config.get("OUTBOX_DIR") or config.ROOT / "outbox")
     outbox.mkdir(parents=True, exist_ok=True)
     stage = "registrar" if ctx.action == "notify_registrar" else "host"
-    eml = outbox / f"{ctx.verdict.event_id}-{stage}.eml"
+    name = safe_id(ctx.verdict.event_id)
+    eml = outbox / f"{name}-{stage}.eml"
     eml.write_bytes(bytes(message))
 
     if live:

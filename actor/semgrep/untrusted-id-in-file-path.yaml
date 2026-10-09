@@ -1,0 +1,21 @@
+rules:
+  - id: untrusted-id-in-file-path
+    languages: [python]
+    severity: ERROR
+    message: >-
+      An identifier that arrives from outside (`$OBJ.event_id`) is used to build a file
+      path. A value such as `../../../x` writes outside the intended folder (path
+      traversal, CWE-22). Validate the identifier where it enters the program and wrap it
+      with `safe_id(...)` where the path is built.
+    metadata:
+      cwe: "CWE-22: Improper Limitation of a Pathname to a Restricted Directory"
+      owasp: "A01:2021 Broken Access Control"
+      category: security
+      confidence: MEDIUM
+    patterns:
+      - pattern-either:
+          - pattern: $DIR / f"...{$OBJ.event_id}..."
+          - pattern: $DIR / $OBJ.event_id
+          - pattern: os.path.join(..., f"...{$OBJ.event_id}...", ...)
+          - pattern: os.path.join(..., $OBJ.event_id, ...)
+          - pattern: open(f"...{$OBJ.event_id}...", ...)

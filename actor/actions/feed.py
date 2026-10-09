@@ -9,7 +9,7 @@ import subprocess
 from pathlib import Path
 
 from .. import config
-from ..contract import now_iso
+from ..contract import now_iso, safe_id
 from ..evidence import defang, for_people
 from ..policy import is_allowlisted
 from . import Context, Outcome
@@ -137,8 +137,9 @@ def execute(ctx: Context) -> Outcome:
     render(repo, entries)
     incidents = repo / "incidents"
     incidents.mkdir(exist_ok=True)
-    (incidents / f"{verdict.event_id}.md").write_text(_incident_page(ctx), encoding="utf-8")
-    (incidents / f"{verdict.event_id}.json").write_text(
+    name = safe_id(verdict.event_id)   # validated on arrival, cleaned again where the path is built
+    (incidents / f"{name}.md").write_text(_incident_page(ctx), encoding="utf-8")
+    (incidents / f"{name}.json").write_text(
         json.dumps(ctx.bundle, indent=2) + "\n", encoding="utf-8")
     error = _commit_and_push(repo, f"Add {verdict.event_id} ({verdict.threat_type})")
     if error:
