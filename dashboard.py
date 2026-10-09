@@ -16,7 +16,7 @@ from shipper.presentation import (
     status_tone, timeline, timeline_html,
 )
 from shipper.settings import Settings
-from shipper.storage import read_json
+from shipper.runtime_status import read_runtime_status
 
 st.set_page_config(page_title="Takedown Orchestrator", page_icon="🛡️", layout="wide")
 st.html("<style>" + (Path(__file__).parent / "shipper/dashboard.css").read_text(encoding="utf-8") + "</style>")
@@ -54,12 +54,11 @@ def label_html(label):
     return f'<span class="status-label {status_tone(label)}">{escape(label)}</span>'
 
 
-def render_details(record, receipts, heartbeat):
+def render_details(record, receipts, heartbeat, check):
     event, metadata = record["event"], record["metadata"]
     selected = event["event_id"]
     matching = sorted((r for r in receipts if r["event_id"] == selected),
                       key=lambda r: r.get("created_at", ""), reverse=True)
-    check = read_json(settings.run_dir / "target-check.json", {})
     owned_target = event["target_url"] == settings.controlled_url
     fresh_down = (owned_target and check.get("http_status") == 410
                   and current_confirmation(check, heartbeat, os.getenv("SHIPPER_STARTED_AT")))
@@ -110,7 +109,9 @@ def render_run_details(snapshot, error, pipeline):
         st.text(f"Source: {settings.source} · Refresh: 2 seconds")
         if pipeline:
             st.text("Pipeline: " + pipeline.get("detail", pipeline.get("status", "Unknown")))
-        deployment = read_json(settings.data_dir / "deployment.json", {})
+        deployment, deployment_error = read_runtime_status(settings.data_dir / "deployment.json")
+        if deployment_error:
+            st.error(deployment_error)
         st.text("Akash: " + (f"deployment {deployment['dseq']}" if deployment.get("dseq") else "deployment not verified"))
         runtime_scan = bool(snapshot and any(
             r["metadata"].get("scanner") == "semgrep" and r["metadata"].get("scan_completed_at")
@@ -134,14 +135,18 @@ def live_panels():
     except Exception as exc:
         error = type(exc).__name__
     snapshot = st.session_state.get("snapshot")
-    heartbeat = read_json(settings.run_dir / "heartbeat.json", {})
-    supervisor = read_json(settings.run_dir / "supervisor.json", {})
-    pipeline = read_json(settings.run_dir / "pipeline.json", {})
+    statuses = []
+    for name in ("heartbeat.json", "supervisor.json", "pipeline.json", "target-check.json"):
+        value, status_error = read_runtime_status(settings.run_dir / name)
+        statuses.append(value)
+        if status_error:
+            st.error(status_error)
+    heartbeat, supervisor, pipeline, check = statuses
     updated = parse_time(heartbeat.get("updated_at"))
     age = (datetime.now(timezone.utc) - updated).total_seconds() if updated else None
     status = heartbeat.get("status", "not connected")
     boot, worker_start = parse_time(os.getenv("SHIPPER_STARTED_AT")), parse_time(heartbeat.get("started_at"))
-    stale_worker = age is None or age > 15 or bool(boot and (not worker_start or worker_start < boot))
+    stale_worker = age is None or age < 0 or age > 15 or bool(boot and (not worker_start or worker_start < boot))
     if stale_worker:
         st.warning("Worker heartbeat unavailable or stale. Pipeline activity cannot be confirmed.")
     elif status in {"degraded", "paused", "stopped"}:
@@ -179,7 +184,6 @@ def live_panels():
     # already consumed any click against the PREVIOUS rendered IDs.
     st.session_state["queue_event_ids"] = ids
     st.session_state["threat_queue"] = {"selection": {"rows": [ids.index(selected)], "columns": [], "cells": []}}
-    check = read_json(settings.run_dir / "target-check.json", {})
     fresh = check.get("http_status") == 410 and current_confirmation(check, heartbeat, os.getenv("SHIPPER_STARTED_AT"))
     rows = []
     for record in records:
@@ -207,7 +211,7 @@ def live_panels():
                          column_config={"Event": st.column_config.TextColumn(width="medium"),
                                         "Target": st.column_config.TextColumn(width="large")})
         with detail, st.container(key="event_details"):
-            render_details(next(r for r in records if r["event"]["event_id"] == selected), receipts, heartbeat)
+            render_details(next(r for r in records if r["event"]["event_id"] == selected), receipts, heartbeat, check)
     render_run_details(snapshot, error, pipeline)
 
 

@@ -1,6 +1,7 @@
 """The eight-field team contract plus presentation-only metadata."""
 import ipaddress
 import math
+import re
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
@@ -49,20 +50,29 @@ def public_proof(url):
         if any(ord(ch) < 33 for ch in str(url)) or "\\" in str(url):
             return None
         parsed = urlsplit(str(url))
-        host = (parsed.hostname or "").lower()
+        host = (parsed.hostname or "").encode("idna").decode("ascii").lower()
+        # Browsers normalize Unicode dots, escaped hosts and a trailing DNS root dot.
+        # Validate the same hostname they will navigate to, not the raw spelling.
+        if "%" in parsed.netloc:
+            return None
+        if host.endswith("."):
+            host = host[:-1]
         if parsed.scheme not in {"http", "https"} or not host or parsed.username or parsed.password:
             return None
-        if host == "localhost" or "." not in host or host.endswith((".localhost", ".local", ".internal", ".test", ".invalid")):
+        if host == "localhost" or host.endswith((".localhost", ".local", ".internal", ".test", ".invalid")):
             return None
         try:
             if not ipaddress.ip_address(host).is_global:
                 return None
         except ValueError:
-            if host.replace(".", "").isdigit() or host.startswith("0x"):
+            labels = host.split(".")
+            if (len(labels) < 2 or len(host) > 253
+                or any(not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label) for label in labels)
+                or labels[-1].isdigit() or labels[-1].startswith("0x")):
                 return None
         _ = parsed.port
         return str(url)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, UnicodeError):
         return None
 
 
@@ -82,8 +92,11 @@ def receipt_label(receipt):
 
 
 def current_confirmation(check, heartbeat, not_before=None):
-    checked, started = parse_time(check.get("checked_at")), parse_time(heartbeat.get("started_at"))
-    boundary = parse_time(not_before)
+    try:
+        checked, started = parse_time(check.get("checked_at")), parse_time(heartbeat.get("started_at"))
+        boundary = parse_time(not_before)
+    except (TypeError, ValueError, OverflowError):
+        return False
     return bool(checked and started and (not boundary or started >= boundary)
         and check.get("started_at") == heartbeat.get("started_at")
         and 0 <= (datetime.now(timezone.utc) - checked).total_seconds() < 15)

@@ -58,14 +58,26 @@ jobs:
           previous_start=$(docker exec demo python -c "import json; print(json.load(open('/data/runs/ci-controlled/heartbeat.json'))['started_at'])")
           docker restart demo
           docker exec demo python -m shipper.verify_run --wait 45 --previous-started-at "$previous_start" --output /data/verification-after-restart.json
+          # An actual dependency outage must be visible and recover without new actions.
+          docker stop clickhouse-ci
+          docker exec demo python -c "import json,time; from pathlib import Path; p=Path('/data/runs/ci-controlled/heartbeat.json'); deadline=time.monotonic()+45; exec('while time.monotonic()<deadline:\n if json.loads(p.read_text()).get(\"status\")==\"degraded\": break\n time.sleep(1)\nelse: raise SystemExit(\"worker did not expose ClickHouse outage\")')"
+          docker cp demo:/data/runs/ci-controlled/heartbeat.json /tmp/outage-heartbeat.json
+          docker start clickhouse-ci
+          docker exec demo python -m shipper.verify_run --wait 60 --output /data/verification-after-outage.json
           mkdir -p controlled-evidence
+          cp /tmp/outage-heartbeat.json controlled-evidence/outage-heartbeat.json
           docker cp demo:/data/verification.json controlled-evidence/verification.json
           docker cp demo:/data/verification-after-restart.json controlled-evidence/verification-after-restart.json
+          docker cp demo:/data/verification-after-outage.json controlled-evidence/verification-after-outage.json
           for file in events.json scan-findings.json actions.jsonl target-check.json; do
             docker cp demo:/data/runs/ci-controlled/$file controlled-evidence/$file
           done
           docker logs demo
-          docker stop demo
+          # A hard worker exit must fail the container and save its cause.
+          docker exec demo python -c "import os,signal; from pathlib import Path; workers=[int(p.name) for p in Path('/proc').iterdir() if p.name.isdigit() and (p/'cmdline').exists() and b'shipper.worker' in (p/'cmdline').read_bytes().split(bytes([0]))]; assert len(workers)==1,workers; os.kill(workers[0],signal.SIGKILL)"
+          test "$(docker wait demo)" = 1
+          docker cp demo:/data/runs/ci-controlled/supervisor.json controlled-evidence/worker-failure.json
+          python -c "import json; s=json.load(open('controlled-evidence/worker-failure.json')); assert s['status']=='failed' and s['process']=='worker',s"
           docker stop clickhouse-ci
       - uses: actions/upload-artifact@v4
         with:

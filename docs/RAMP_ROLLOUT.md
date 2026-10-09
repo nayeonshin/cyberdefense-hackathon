@@ -20,7 +20,7 @@ The new autonomous run ingested at 20:39:07 UTC, scanned with actual Semgrep at 
 
 The first replacement on Palmito (`1791577874883`) completed a 12.271-second controlled run but was then also closed by the provider. The final deployment uses Digital Frontier. No cause for provider closure was established.
 
-A local backup, `outputs/akash-controlled-001-backup.tar.gz`, contains the current ledger, registrar state, attempts, event, scan findings, capture and saved test message. Archive contents were listed successfully. A restoration from this backup has not been exercised.
+A local backup, `outputs/akash-controlled-001-backup.tar.gz`, contains the current ledger, registrar state, attempts, event, scan findings, capture and saved test message. Full QA restored it to an isolated local directory on October 9 at 21:32 UTC: the receipt file remained byte-for-byte unchanged, one ticket remained, and the restarted coordinator produced a fresh HTTP 410 check. This verifies application-level backup recovery, not migration of a provider-managed volume. See [QA report](QA_REPORT.md).
 
 ## Rollback
 

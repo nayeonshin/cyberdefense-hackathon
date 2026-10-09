@@ -2,9 +2,8 @@
 import argparse
 import json
 import time
-from datetime import datetime, timezone
 
-from .model import parse_time
+from .model import current_confirmation, parse_time
 from .settings import Settings
 from .storage import read_json, read_jsonl, write_json
 
@@ -20,12 +19,13 @@ def inspect_run(settings, previous_started_at=None):
     if not records or not findings.get("findings"):
         return None
     event, meta = records[0]["event"], records[0]["metadata"]
-    sent = [r for r in receipts if r["action"] == "mock_registrar" and r["status"] == "SENT" and not r["dry_run"]]
-    confirmed = [r for r in receipts if r["status"] == "CONFIRMED_DOWN" and not r["dry_run"]]
+    matching = [r for r in receipts if r["event_id"] == event["event_id"]
+                and r["target_url"] == event["target_url"] and not r["dry_run"]]
+    sent = [r for r in matching if r["action"] == "mock_registrar" and r["status"] == "SENT"]
+    confirmed = [r for r in matching if r["status"] == "CONFIRMED_DOWN"]
     if len(sent) > 1:
         raise RuntimeError("Duplicate controlled dispatch detected")
-    checked = parse_time(check.get("checked_at"))
-    fresh = checked and (datetime.now(timezone.utc) - checked).total_seconds() < 15
+    fresh = current_confirmation(check, heartbeat)
     if (not sent or not confirmed or not fresh or check.get("http_status") != 410
         or check.get("started_at") != heartbeat.get("started_at")):
         return None

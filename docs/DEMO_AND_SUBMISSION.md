@@ -6,11 +6,12 @@ Semgrep; the latest CI run also writes and queries a real ClickHouse container.
 
 ## Current evidence (October 9)
 
-- Live: <https://j37o2jgnu9bq57cesbda28htdc.ingress.akash-palmito.org/>
-- Akash DSEQ `1791574764504`, provider Akash Palmito, sponsor credits only, 24-hour runtime limit.
-- Actual cloud Semgrep-to-Actor run: **12.238 seconds**, one mock-registrar submission, HTTP 410.
-- [42 tests and real ClickHouse container run](https://github.com/nayeonshin/cyberdefense-hackathon/actions/runs/37982475135):
-  **12.947 seconds**, persisted ledger, new worker and fresh check after restart, one submitted receipt.
+- Live: <https://rlts1sj4jhcur9q89cjbfn8omk.ingress.h6i-dedicated.eu-se-1.digitalfrontier.so/>
+- Akash DSEQ `1791578237742`, provider Digital Frontier, sponsor credits only, 24-hour runtime limit.
+- Actual cloud Semgrep-to-Actor run: **15.054 seconds**, one mock-registrar submission, HTTP 410.
+- [Redesign's 48 tests and real ClickHouse container run](https://github.com/nayeonshin/cyberdefense-hackathon/actions/runs/37987379983):
+  **12.649 seconds**, persisted ledger, new worker and fresh check after restart, one submitted receipt.
+- See [QA report](QA_REPORT.md) for subsequent tests and fixes; these timings describe the recorded runs above.
 - The cloud dashboard currently uses file storage. Member 1's localhost database is not reachable from Akash.
 - Guild AI sponsor execution is not yet independently verified. No final recording or submission exists yet.
 - Team identity and submitter fields remain intentionally unfilled until the team supplies them.
@@ -20,7 +21,7 @@ Semgrep; the latest CI run also writes and queries a real ClickHouse container.
 | Time | Show | Say |
 |---|---|---|
 | 0:00–0:20 | Dashboard overview | “Detection is only the start. Our orchestrator follows a signal through inspection, action, and a verifiable receipt.” |
-| 0:20–0:45 | Verified Akash deployment and architecture | “The worker runs independently of this browser on Akash. ClickHouse connects the stages. Semgrep supplies code evidence; Guild AI supplies the evaluation evidence shown here.” Only say the final clause if verified. |
+| 0:20–0:45 | Verified Akash deployment and architecture | “The worker runs independently of this browser on Akash. This cloud run uses persistent files; a separate CI run verifies ClickHouse. Semgrep supplies the actual code evidence.” Describe Guild AI only if Member 2 supplies verified execution evidence. |
 | 0:45–1:15 | Automatic ingestion of the owned target | “This harmless, team-owned page is our controlled target. No outside website is being taken down in this demonstration.” |
 | 1:15–1:45 | Actual Member 2 scan output | “This is the actual Semgrep rule, matched code, and confidence returned for this event.” |
 | 1:45–2:15 | Mock receipt and fresh HTTP 410 check | “The agent submitted an evidence-hashed report to our private mock registrar. Two rechecks observed suspension. No person moved it between stages.” |
@@ -52,8 +53,8 @@ Takedown Orchestrator connects threat ingestion, payload inspection, action disp
 observable workflow. ClickHouse stores events and receipts; Member 2’s Semgrep integration supplies matched
 code evidence. A separate worker invokes Member 3’s dispatcher and rechecks the target without browser-driven
 action controls. Streamlit presents ingestion timing, scan results, and per-event action receipts. The container
-runs on Akash with persistent dispatch history. The cloud run completed in 12.238 seconds; a separate actual
-ClickHouse container run completed in 12.947 seconds and preserved one submission across restart. The cloud
+runs on Akash with persistent dispatch history. The cloud run completed in 15.054 seconds; a separate actual
+ClickHouse container run completed in 12.649 seconds and preserved one submission across restart. The cloud
 currently uses file storage while a reachable external ClickHouse endpoint is pending. Our demo uses a harmless
 team-owned target and a private mock registrar; it does not claim that an external provider performed a real-world
 takedown. Guild AI usage is not claimed without Member 2's execution evidence.

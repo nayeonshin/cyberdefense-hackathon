@@ -25,6 +25,7 @@ For Docker, run `docker compose up --build` (Linux containers). The named volume
 - [Three-minute script and submission checklist](docs/DEMO_AND_SUBMISSION.md)
 - [Reference ClickHouse schema](integration/reference-schema.sql)
 - [Member 3 Actor documentation](actor/README.md)
+- [Full QA findings and validation](docs/QA_REPORT.md)
 
 ```mermaid
 flowchart LR
@@ -52,7 +53,8 @@ joined by `event_id`; the UI does not equate a report submission with an externa
 Actor unit tests use test-provided verdicts. The team integration test additionally executes Member 2's
 actual Semgrep CLI against the harmless owned page, saves findings, and verifies one receipt plus confirmed
 suspension across a coordinator restart. File-mode execution is not ClickHouse, Guild or Akash evidence.
-The final sponsor recording still requires a reachable ClickHouse instance and verified Akash deployment.
+The final sponsor recording still requires a reachable external ClickHouse instance. Akash is deployed;
+see [current deployment evidence](docs/RAMP_ROLLOUT.md) for its URL, expiry and integration boundaries.
 
 ## Current integration boundaries
 

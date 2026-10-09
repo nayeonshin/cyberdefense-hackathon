@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from filelock import FileLock
 from actor import config
 from actor.dispatch import dispatch
+from actor.contract import Verdict
 from actor.ledger import COLUMNS, DDL, Ledger, _parse
 from actor.recheck import recheck_once
 from .controlled import start_registrar
@@ -64,6 +65,24 @@ class Coordinator:
                    "updated_at": now_iso(), "started_at": self.started_at, "run_id": self.settings.run_id,
                    "mode": self.settings.mode, "source": self.settings.source, **extra})
 
+    def recover_recheck(self, event):
+        """Close the crash window between a saved receipt and Actor state."""
+        rows = [r for r in self.ledger.all() if r["event_id"] == event["event_id"]
+                and r["target_url"] == event["target_url"] and not r["dry_run"]]
+        if not any(r["action"] == "mock_registrar" and r["status"] == "SENT" for r in rows):
+            return
+        state = self.ledger.load_state()
+        entry = state.get(event["event_id"])
+        changed = entry is None
+        if entry is None:
+            entry = {"verdict": Verdict.from_dict({**event, "controlled": True, "simulated": False}).__dict__,
+                     "fails": 0, "confirmed": False, "escalated": False}
+            state[event["event_id"]] = entry
+        if not entry["confirmed"] and any(r["status"] == "CONFIRMED_DOWN" for r in rows):
+            entry["confirmed"], changed = True, True
+        if changed:
+            self.ledger.save_state(state)
+
     def tick(self):
         if self.settings.mode == "preview":
             self.heartbeat("preview", "Preview only. No actions are executed.")
@@ -79,10 +98,12 @@ class Coordinator:
             event, meta = record["event"], record["metadata"]
             if (event["target_url"] != self.settings.controlled_url or meta.get("run_id") != self.settings.run_id
                 or meta.get("scanner") != "semgrep" or not meta.get("scan_completed_at")
+                or meta.get("scan_error") or event["action_status"] in {"SCAN_FAILED", "FETCH_FAILED"}
                 or not event["semgrep_detected"] or not event["evidence"]):
                 continue
             parse_time(meta["scan_completed_at"])
             eligible += 1
+            self.recover_recheck(event)
             event_id = event["event_id"]
             previous = self.attempts.get(event_id, {})
             if previous.get("complete") or previous.get("count", 0) >= 3:
@@ -145,7 +166,8 @@ def main():
                 except Exception as exc:
                     # Never persist exception messages: drivers may include credentials or queries.
                     status = {"status": "degraded", "detail": f"{type(exc).__name__}: integration unavailable; see local service logs.",
-                              "updated_at": now_iso(), "run_id": settings.run_id, "mode": settings.mode, "source": settings.source}
+                              "updated_at": now_iso(), "started_at": coordinator.started_at if coordinator else now_iso(),
+                              "run_id": settings.run_id, "mode": settings.mode, "source": settings.source}
                     try:
                         write_json(settings.run_dir / "heartbeat.json", status)
                     except PermissionError:
