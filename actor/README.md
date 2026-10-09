@@ -220,7 +220,9 @@ mock registrar and the mail sink.
 
 ### The stage run
 
-Three terminals, then one command per run:
+On Windows one command opens the three processes in a window each and does the first run:
+`powershell -ExecutionPolicy Bypass -File actor\stage.ps1` (add `-Stop` to close them).
+By hand it is three terminals, then one command per run:
 
 ```bash
 python -m actor.mock_registrar_server
