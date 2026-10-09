@@ -27,6 +27,9 @@ jobs:
           path.write_text(json.dumps(config))
           PY
           sudo systemctl restart docker
+          # These dependencies are public. Hosted-runner Hub credentials otherwise
+          # bypass the anonymous mirror and can hang in Hub's token endpoint.
+          docker logout docker.io
       - uses: docker/setup-buildx-action@v3
         with:
           driver: docker
