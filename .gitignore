@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+outbox/
+ledger/
+state.json
+STOP

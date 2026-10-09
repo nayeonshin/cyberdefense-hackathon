@@ -1,0 +1,76 @@
+# Rules of engagement for the Actor. Confidence comes from the verdict stage.
+
+thresholds:
+  protect: 0.80       # rung 0: publish to the public feed
+  report: 0.90        # rung 1: community reporting platforms
+  notify_host: 0.95   # rung 2: abuse report to the hosting provider (also needs corroboration)
+
+rate_limit_per_recipient_per_hour: 5
+
+recheck:
+  escalate_after_seconds: 600   # rung 3: tell the registrar if the target is still up
+  confirm_failures: 2           # rung 4: consecutive failed checks before "confirmed down"
+
+# Never treat these as malicious domains. A bad URL on one of them is reported
+# per URL only: no blocklist entry, no IP report, no mail to their abuse desk.
+allowlist:
+  - google.com
+  - googleusercontent.com
+  - youtube.com
+  - microsoft.com
+  - live.com
+  - office.com
+  - windows.net
+  - azurewebsites.net
+  - apple.com
+  - icloud.com
+  - amazon.com
+  - amazonaws.com
+  - cloudfront.net
+  - github.com
+  - github.io
+  - githubusercontent.com
+  - gitlab.com
+  - cloudflare.com
+  - pages.dev
+  - workers.dev
+  - vercel.app
+  - netlify.app
+  - herokuapp.com
+  - dropbox.com
+  - notion.so
+  - notion.site
+  - wordpress.com
+  - blogspot.com
+  - weebly.com
+  - wixsite.com
+  - facebook.com
+  - instagram.com
+  - whatsapp.com
+  - linkedin.com
+  - x.com
+  - twitter.com
+  - discord.com
+  - telegram.org
+  - t.me
+  - paypal.com
+  - wikipedia.org
+
+# An IP in one of these networks serves many unrelated sites, so it is never
+# reported to an IP reputation list.
+shared_infra_networks:
+  - CLOUDFLARE
+  - AKAMAI
+  - FASTLY
+  - GOOGLE
+  - AMAZON
+  - AMAZO
+  - MICROSOFT
+  - MSFT
+  - GITHUB
+  - EDGECAST
+
+# Targets the team owns. They only ever go to the mock registrar and the mail sink.
+controlled_hosts:
+  - localhost
+  - 127.0.0.1
