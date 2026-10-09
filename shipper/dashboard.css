@@ -1,12 +1,13 @@
 :root{--ink:#0c0a08;--bone:#f4f2f0;--paper:#fff;--ash:#6d6c6b;--line:#e5e7eb;--accent:#e4f222;--danger:#a12b24;--pending:#805500}
 html,body,[data-testid="stApp"],button,input,textarea{font-family:Inter,ui-sans-serif,system-ui,sans-serif!important;font-weight:400!important}
 [data-testid="stAppViewContainer"]{background:var(--bone)}
-.block-container{max-width:1200px;padding:2.7rem 24px 3rem}
+.block-container{max-width:1200px;padding:4.25rem 24px 3rem}
 h1,h2,h3,h4,h5,h6,p,strong,b,label,[data-testid="stMarkdownContainer"]{font-weight:400!important}
 h1{font-size:40px!important;line-height:1.05!important;letter-spacing:-1.2px;padding-bottom:12px!important}
 h2,h3{font-size:24px!important;line-height:1.17!important;letter-spacing:-.4px}
 p,li{font-size:16px;line-height:1.5}
 [data-testid="stCaptionContainer"],[data-testid="stCaptionContainer"] p{color:var(--ash);font-size:12px!important;line-height:1.6}
+[data-testid="stCaptionContainer"]{opacity:1!important}
 [data-testid="stHeader"]{background:var(--bone)}
 [data-testid="stVerticalBlock"]{gap:12px}
 [data-testid="stVerticalBlockBorderWrapper"]{border-color:var(--line)!important;border-radius:16px!important;box-shadow:none!important}
