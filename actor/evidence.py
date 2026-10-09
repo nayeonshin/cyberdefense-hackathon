@@ -1,14 +1,23 @@
 """Evidence bundle with a stable hash, so every report can be checked against the feed."""
 import hashlib
 import json
+import re
 
 from .contract import Verdict
 from .enrich import Enrichment
 
+SCHEME = re.compile(r"http", re.IGNORECASE)
+
 
 def defang(text: str) -> str:
     """Make a URL or domain unclickable for human-readable pages."""
-    return text.replace("http", "hxxp").replace(".", "[.]")
+    return SCHEME.sub(lambda m: m.group(0)[0] + "xx" + m.group(0)[3:], text).replace(".", "[.]")
+
+
+def for_people(text: str, limit: int = 2000) -> str:
+    """Evidence text as it may appear in a page or mail: no live links, bounded length."""
+    text = SCHEME.sub(lambda m: m.group(0)[0] + "xx" + m.group(0)[3:], text)
+    return text if len(text) <= limit else text[:limit] + f" [...] ({len(text)} characters in total)"
 
 
 def build(verdict: Verdict, enrichment: Enrichment) -> dict:

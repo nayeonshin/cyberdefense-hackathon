@@ -78,6 +78,8 @@ mock registrar and the mail sink.
 
 ## Guardrails
 
+- Malformed verdicts are refused with a stated reason: bad `event_id`, a target that is not
+  http or https, a confidence outside 0 to 1, a private address as target.
 - Major platforms are allowlisted: a bad URL there is reported per URL, never as a domain.
 - IPs on shared infrastructure are never reported to an IP reputation list.
 - One report per domain and channel, five per recipient per hour.

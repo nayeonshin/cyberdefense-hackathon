@@ -83,7 +83,7 @@ def _tile(x, y, w, label, value, change, good_change, series) -> str:
                else f"M{x + 12:.1f} {y + 63} l5 8 l5 -8 z")
         out.append(f'<path d="{tri}" class="{cls}"/>')
         out.append(_text(x + 26, y + 72, f"{change:+g}", 11, "t2"))
-    out.append(_spark(x + w - 62, y + 56, 50, 18, series))
+    out.append(_spark(x + w - 58, y + 62, 46, 14, series))
     return "".join(out)
 
 

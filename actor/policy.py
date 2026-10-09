@@ -5,7 +5,7 @@ from pathlib import Path
 import yaml
 
 from .contract import Verdict
-from .enrich import Enrichment
+from .enrich import Enrichment, is_internal, is_ip
 
 POLICY_PATH = Path(__file__).with_name("policy.yaml")
 
@@ -67,6 +67,10 @@ def decide(verdict: Verdict, enrichment: Enrichment, policy: dict,
         add("notify_host", 2, "abuse@mock-registrar.test")
         return decision
 
+    if is_ip(verdict.host) and is_internal(verdict.host):
+        decision.skipped.append(("all", "target address is not public"))
+        return decision
+
     allowlisted = is_allowlisted(verdict.host, policy)
 
     if confidence < limits["protect"]:
@@ -83,6 +87,8 @@ def decide(verdict: Verdict, enrichment: Enrichment, policy: dict,
         decision.skipped.append(("abuseipdb", "allowlisted platform, URL-level reports only"))
     elif not enrichment.ips:
         decision.skipped.append(("abuseipdb", "host does not resolve"))
+    elif is_internal(enrichment.ips[0]):
+        decision.skipped.append(("abuseipdb", "host resolves to an address that is not public"))
     elif is_shared_infra(enrichment, policy):
         decision.skipped.append(("abuseipdb", f"shared infrastructure ({enrichment.host_network})"))
     else:

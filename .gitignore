@@ -6,3 +6,4 @@ outbox/
 ledger/
 state.json
 STOP
+actor/bench/latest.json

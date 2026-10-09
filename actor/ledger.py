@@ -109,6 +109,10 @@ class Ledger:
                          if r["domain"] == domain and r["status"] in DONE_STATUSES
                          and not r["dry_run"])
 
+    def reported(self, action: str, recipient: str) -> bool:
+        return any(r["action"] == action and r["recipient"] == recipient
+                   and r["status"] in DONE_STATUSES and not r["dry_run"] for r in self.all())
+
     def count_recent(self, recipient: str, seconds: int = 3600) -> int:
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=seconds)
         return sum(1 for r in self.all()

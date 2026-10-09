@@ -11,9 +11,11 @@ import time
 
 from . import config, evidence, policy as policy_module
 from .actions import Context, registry
-from .contract import DONE_STATUSES, Receipt, Verdict
+from .contract import DONE_STATUSES, Receipt, Verdict, safe_id
 from .enrich import Enrichment, enrich
 from .ledger import Ledger, clickhouse_client
+
+MAIL_ACTIONS = ("notify_host", "notify_registrar")
 
 DEFAULT_QUERY = """
 SELECT event_id, target_url, toString(timestamp) AS timestamp, semgrep_detected,
@@ -48,9 +50,11 @@ def run_plans(verdict: Verdict, enrichment: Enrichment, plans: list, live: bool,
             receipt.detail = "simulated verdict, never sent: " + receipt.detail
         elif module.LIVE_FLAG and not config.flag(module.LIVE_FLAG):
             receipt.detail = f"channel off ({module.LIVE_FLAG}=0): " + receipt.detail
-        elif ledger.count_recent(plan.recipient) >= limit:
+        elif plan.action in MAIL_ACTIONS and ledger.count_recent(plan.recipient) >= limit:
             receipt.status = "SKIPPED"
-            receipt.detail = f"rate limit of {limit} per hour reached for {plan.recipient}"
+            receipt.detail = f"rate limit of {limit} mails per hour reached for {plan.recipient}"
+        elif plan.action == "abuseipdb" and ledger.reported(plan.action, plan.recipient):
+            receipt.status, receipt.detail = "SKIPPED", f"{plan.recipient} was already reported"
         else:
             started = time.perf_counter()
             try:
@@ -69,9 +73,16 @@ def run_plans(verdict: Verdict, enrichment: Enrichment, plans: list, live: bool,
 def dispatch(verdict, live: bool = False, offline: bool = False,
              ledger: Ledger = None, policy: dict = None) -> list:
     """Run the ladder for one verdict (a dict in the team contract, or a Verdict)."""
-    if isinstance(verdict, dict):
-        verdict = Verdict.from_dict(verdict)
     ledger = ledger or Ledger()
+    if not isinstance(verdict, Verdict):
+        try:
+            verdict = Verdict.from_dict(verdict)
+        except ValueError as exc:
+            claimed = verdict.get("event_id", "invalid") if isinstance(verdict, dict) else "invalid"
+            refusal = Receipt(safe_id(claimed), "", "", "all", 0, "", "SKIPPED", dry_run=not live,
+                              detail=f"malformed verdict refused: {exc}")
+            ledger.append(refusal)
+            return [refusal]
     policy = policy or policy_module.load()
     controlled = policy_module.is_controlled(verdict, policy)
     enrichment = enrich(verdict.host, offline=offline or controlled)

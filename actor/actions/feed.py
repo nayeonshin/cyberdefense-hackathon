@@ -4,12 +4,13 @@ The repo holds feed.json (machine feed), blocklist.txt and hosts.txt (for DNS
 blockers) and one evidence page per incident. Publishing is a git commit and push.
 """
 import json
+import re
 import subprocess
 from pathlib import Path
 
 from .. import config
 from ..contract import now_iso
-from ..evidence import defang
+from ..evidence import defang, for_people
 from ..policy import is_allowlisted
 from . import Context, Outcome
 
@@ -48,6 +49,17 @@ def render(repo: Path, entries: list) -> None:
         HEADER + "".join(f"0.0.0.0 {d}\n" for d in domains), encoding="utf-8")
 
 
+def _cell(text: str) -> str:
+    return " ".join(for_people(text, 80).replace("|", "/").split())
+
+
+def _fenced(text: str) -> str:
+    """A code fence longer than any backtick run inside, so the text cannot break out."""
+    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+    fence = "`" * max(3, longest + 1)
+    return "\n".join([fence + "text", text, fence])
+
+
 def _incident_page(ctx: Context) -> str:
     verdict, enrichment = ctx.verdict, ctx.enrichment
     return "\n".join([
@@ -57,15 +69,15 @@ def _incident_page(ctx: Context) -> str:
         "|---|---|",
         f"| URL (defanged) | `{defang(verdict.target_url)}` |",
         f"| Domain | `{defang(verdict.host)}` |",
-        f"| Observed | {verdict.timestamp} |",
+        f"| Observed | {_cell(verdict.timestamp)} |",
         f"| Confidence | {verdict.confidence_score:.2f} |",
-        f"| Hosting network | {enrichment.host_network or 'unknown'} |",
-        f"| Registrar | {enrichment.registrar or 'unknown'} |",
+        f"| Hosting network | {_cell(enrichment.host_network) or 'unknown'} |",
+        f"| Registrar | {_cell(enrichment.registrar) or 'unknown'} |",
         f"| Evidence SHA-256 | `{ctx.sha}` |",
         "",
         "## Evidence",
         "",
-        verdict.evidence or "No evidence text supplied.",
+        _fenced(for_people(verdict.evidence)) if verdict.evidence else "No evidence text supplied.",
         "",
         f"The full evidence bundle is in [{verdict.event_id}.json]({verdict.event_id}.json). "
         "Its SHA-256 over the canonical JSON equals the hash above and the hash quoted in "

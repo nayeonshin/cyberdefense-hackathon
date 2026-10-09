@@ -10,7 +10,7 @@ from email.utils import formatdate, make_msgid
 from pathlib import Path
 
 from .. import config
-from ..evidence import defang
+from ..evidence import defang, for_people
 from . import Context, Outcome
 
 LIVE_FLAG = None          # always runs in live mode, but only into the sink by default
@@ -65,7 +65,7 @@ def build(ctx: Context, to_address: str) -> EmailMessage:
         f"Domain:          {defang(verdict.host)}",
         f"IP address:      {', '.join(ctx.enrichment.ips) or 'did not resolve'}",
         f"Observed (UTC):  {verdict.timestamp}",
-        f"Evidence:        {verdict.evidence}",
+        f"Evidence:        {for_people(verdict.evidence)}",
         f"Evidence SHA-256: {ctx.sha}",
     ]
     if feed:
