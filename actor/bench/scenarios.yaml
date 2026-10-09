@@ -564,3 +564,152 @@
     - dispatch: {verdict: {target_url: "https://sites.google.com/view/still-up"}}
     - recheck: {up: true}
   expect: url_only
+
+# ---------------------------------------------------------------- team pipeline
+# Rows as Member 1's table holds them, answered by a scripted version of Member 2's
+# brain (VERIFIED at 0.96 unless stated), then handed to the Actor by actor/intake.py.
+- id: pipeline-verified
+  group: pipeline
+  title: A row from URLhaus, verified by the brain, gets the full ladder
+  steps:
+    - intake: {}
+  expect: full
+  checks: {status: {pipeline-verified-1: REPORTED}}
+
+- id: pipeline-unknown-feed
+  group: pipeline
+  title: A row from an uncurated source has no second source, so the host is not mailed
+  steps:
+    - intake: {rows: [{feed_source: manual}]}
+  expect: report
+  checks: {status: {pipeline-unknown-feed-1: REPORTED}}
+
+- id: pipeline-rejected
+  group: pipeline
+  title: The brain rejects the page, so nothing is sent
+  steps:
+    - intake: {brain: [{action_status: REJECTED, confidence_score: 0.4}]}
+  expect: none
+  checks: {status: {pipeline-rejected-1: SCANNED}}
+
+- id: pipeline-rejected-but-confident
+  group: pipeline
+  title: REJECTED wins even when the score in the same answer is high
+  steps:
+    - intake: {brain: [{action_status: REJECTED, confidence_score: 0.99}]}
+  expect: none
+
+- id: pipeline-fetch-failed
+  group: pipeline
+  title: The brain could not fetch the page, so nothing is sent
+  steps:
+    - intake: {brain: [{action_status: FETCH_FAILED, semgrep_detected: false, confidence_score: 0.0}]}
+  expect: none
+  checks: {status: {pipeline-fetch-failed-1: SCANNED}}
+
+- id: pipeline-brain-down
+  group: pipeline
+  title: The brain is unreachable, rows stay pending and nothing is sent
+  steps:
+    - intake: {brain_error: true}
+  expect: none
+  checks: {status: {pipeline-brain-down-1: PENDING}}
+
+- id: pipeline-answers-swapped
+  group: pipeline
+  title: The brain's answers belong to other events and are refused
+  steps:
+    - intake:
+        rows: [{}, {}]
+        brain: [{}, {action_status: REJECTED, confidence_score: 0.1}]
+        brain_swap: true
+  expect: none
+  checks: {status: {pipeline-answers-swapped-1: PENDING, pipeline-answers-swapped-2: PENDING}}
+
+- id: pipeline-answer-missing
+  group: pipeline
+  title: The brain returns fewer answers than rows, so the whole batch waits
+  steps:
+    - intake: {rows: [{}, {}], brain_short: true}
+  expect: none
+  checks: {status: {pipeline-answer-missing-1: PENDING}}
+
+- id: pipeline-answer-wrong-shape
+  group: pipeline
+  title: The brain returns an object instead of a list
+  steps:
+    - intake: {brain_not_a_list: true}
+  expect: none
+
+- id: pipeline-text-confidence
+  group: pipeline
+  title: The brain's confidence is the word "high" and the verdict is refused
+  steps:
+    - intake: {brain: [{confidence_score: high}]}
+  expect: none
+
+- id: pipeline-detected-as-text
+  group: pipeline
+  title: The brain says semgrep_detected "true" as text, which is not accepted as yes
+  steps:
+    - intake: {brain: [{semgrep_detected: "true"}]}
+  expect: none
+
+- id: pipeline-malware-download
+  group: pipeline
+  title: URLhaus threat type malware_download is handled
+  steps:
+    - intake: {rows: [{threat_type: malware_download}]}
+  expect: full
+
+- id: pipeline-mixed-batch
+  group: pipeline
+  title: Three rows, one verified, one rejected, one unreachable
+  enrichment: unique
+  steps:
+    - intake:
+        rows: [{}, {}, {}]
+        brain: [{}, {action_status: REJECTED, confidence_score: 0.3}, {action_status: FETCH_FAILED, semgrep_detected: false, confidence_score: 0.0}]
+  expect: full
+  checks: {status: {pipeline-mixed-batch-1: REPORTED, pipeline-mixed-batch-2: SCANNED, pipeline-mixed-batch-3: SCANNED}}
+
+- id: pipeline-platform-row
+  group: pipeline
+  title: A verified row on an allowlisted platform is reported per URL only
+  steps:
+    - intake: {rows: [{target_url: "https://sites.google.com/view/pipeline-row"}]}
+  expect: url_only
+
+- id: pipeline-private-row
+  group: pipeline
+  title: A row pointing at a private address is refused
+  enrichment: private
+  steps:
+    - intake: {rows: [{target_url: "http://10.0.0.8/payload.sh"}]}
+  expect: none
+  checks: {status: {pipeline-private-row-1: SCANNED}}
+
+- id: pipeline-bad-row-id
+  group: pipeline
+  title: A row whose event_id tries to leave the feed folder is refused
+  steps:
+    - intake: {rows: [{event_id: "../../../escaped"}]}
+  expect: none
+
+- id: pipeline-second-pass
+  group: pipeline
+  title: A second pass over the table sends nothing twice
+  steps:
+    - intake: {}
+    - intake: {}
+  expect: full
+
+- id: pipeline-takedown-confirmed
+  group: pipeline
+  title: A confirmed takedown is written back to the table
+  steps:
+    - intake: {}
+    - followup: {up: false}
+    - followup: {up: false}
+  expect: {feed: 1, urlscan: 1, netcraft: 1, abuseipdb: 1, notify_host: 1, confirm: 1}
+  checks: {status: {pipeline-takedown-confirmed-1: TAKEN_DOWN}}

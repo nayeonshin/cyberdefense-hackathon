@@ -12,6 +12,7 @@ import concurrent.futures
 import copy
 import functools
 import hashlib
+import io
 import json
 import os
 import re
@@ -21,6 +22,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 from pathlib import Path
 from unittest import mock
 from urllib.parse import urlparse
@@ -28,7 +30,7 @@ from urllib.parse import urlparse
 import requests
 import yaml
 
-from .. import evidence, policy as policy_module
+from .. import evidence, intake, policy as policy_module
 from ..actions import xarf_email
 from ..contract import now_iso
 from ..dispatch import dispatch
@@ -51,7 +53,7 @@ SHORTHAND = {
     "protect": ["feed"],
     "none": [],
 }
-GROUPS = ["act", "withhold", "hostile", "lifecycle"]
+GROUPS = ["act", "withhold", "hostile", "lifecycle", "pipeline"]
 WEIGHTS = {"decisions": 40, "robustness": 20, "receipts": 20, "lifecycle": 10, "mutants": 10}
 
 FEED_URL = "https://feed.bench.test"
@@ -164,6 +166,63 @@ def _policy() -> dict:
     return policy_module.load()
 
 
+class FakeClickHouse:
+    """Stands in for Member 1's table: pending rows out, status updates in."""
+
+    def __init__(self, rows: list):
+        self.rows, self.inserts = rows, []
+
+    def query(self, sql, parameters=None):
+        pending = [dict(r) for r in self.rows if r["takedown_status"] == "PENDING"]
+        return types.SimpleNamespace(named_results=lambda: pending)
+
+    def command(self, sql, parameters=None):
+        match = re.search(r"takedown_status = '(\w+)'", sql)
+        if match and parameters:
+            for row in self.rows:
+                if row["event_id"] in parameters["ids"]:
+                    row["takedown_status"] = match.group(1)
+
+    def insert(self, table, data, column_names=None):
+        self.inserts.append(table)
+
+
+def _rows(sc: dict, args: dict) -> list:
+    rows = []
+    for i, overrides in enumerate(args.get("rows") or [{}], start=1):
+        row = {"event_id": f"{sc['id']}-{i}",
+               "target_url": f"https://r{i}.{sc['id']}.bad.example/login",
+               "timestamp": "2026-10-09 18:00:00", "threat_type": "phishing",
+               "feed_source": "urlhaus", "takedown_status": "PENDING"}
+        row.update(overrides or {})
+        rows.append(row)
+    return rows
+
+
+def _fake_brain(args: dict):
+    """Member 2's scan, scripted: VERIFIED at 0.96 unless the scenario says otherwise."""
+    def scan(events: list) -> list:
+        if args.get("brain_error"):
+            raise RuntimeError("brain unreachable")
+        results = []
+        for i, event in enumerate(events):
+            result = dict(event, semgrep_detected=True, confidence_score=0.96, findings=[],
+                          evidence="Semgrep rule `fake-login-form` matched index.html line 12",
+                          action_status="VERIFIED")
+            answers = args.get("brain") or []
+            if i < len(answers):
+                result.update(answers[i] or {})
+            results.append(result)
+        if args.get("brain_swap"):
+            results.reverse()
+        if args.get("brain_short"):
+            results = results[:-1]
+        if args.get("brain_not_a_list"):
+            return {"results": results}
+        return results
+    return scan
+
+
 def load_scenarios() -> list:
     return yaml.safe_load(SCENARIOS.read_text(encoding="utf-8"))
 
@@ -272,8 +331,9 @@ def run_scenario(sc: dict, mutant: dict = None) -> dict:
     def fake_enrich(host, offline=False):
         return _enrichment(profile, host)
 
-    crash, latencies, hosts = "", [], set()
+    crash, latencies, hosts, table = "", [], set(), None
     with contextlib.ExitStack() as stack:
+        stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
         stack.enter_context(mock.patch.dict(os.environ, env))
         for target, replacement in [
             ("requests.post", wire.post), ("requests.head", wire.head), ("requests.get", wire.get),
@@ -296,6 +356,15 @@ def run_scenario(sc: dict, mutant: dict = None) -> dict:
                             started = time.perf_counter()
                             dispatch(verdict, live=True, ledger=ledger, policy=policy)
                             latencies.append((time.perf_counter() - started) * 1000)
+                    elif kind == "intake":
+                        if table is None:
+                            table = FakeClickHouse(_rows(sc, args))
+                        hosts.update(_host_of(row) for row in table.rows)
+                        with mock.patch("actor.intake.scan", _fake_brain(args)):
+                            intake.run_once(table, live=True, ledger=ledger, policy=policy)
+                    elif kind == "followup":
+                        wire.up = bool(args.get("up", True))
+                        intake.follow_up(table, live=True, ledger=ledger, policy=policy)
                     else:
                         wire.up = bool(args.get("up", True))
                         recheck_once(ledger, policy, live=True)
@@ -365,6 +434,11 @@ def run_scenario(sc: dict, mutant: dict = None) -> dict:
     for domain in checks.get("blocklist_has", []):
         if domain not in blocklist:
             problems.append(f"blocklist should contain {domain}")
+    for event_id, wanted in (checks.get("status") or {}).items():
+        actual = next((r["takedown_status"] for r in (table.rows if table else [])
+                       if r["event_id"] == event_id), "missing")
+        if actual != wanted:
+            problems.append(f"row {event_id} should be {wanted}, is {actual}")
     for domain in checks.get("blocklist_lacks", []):
         if domain in blocklist:
             problems.append(f"blocklist must not contain {domain}")

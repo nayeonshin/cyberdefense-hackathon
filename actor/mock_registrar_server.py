@@ -26,6 +26,10 @@ and it stores nothing.</p>
 </form></body></html>"""
 
 
+TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
+         ".css": "text/css; charset=utf-8"}
+
+
 class Registrar(ThreadingHTTPServer):
     suspended = False
 
@@ -49,12 +53,28 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, code, data):
         self._send(code, json.dumps(data).encode("utf-8"))
 
+    def _site_file(self):
+        """(body, content type) for a /site path, or None. SITE_DIR swaps in other demo pages."""
+        name = self.path.split("?")[0][len("/site"):].lstrip("/") or "index.html"
+        folder = os.environ.get("SITE_DIR")
+        if not folder:
+            return (SITE, "text/html; charset=utf-8") if name == "index.html" else None
+        path = os.path.join(folder, name)
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", name) or not os.path.isfile(path):
+            return None
+        with open(path, "rb") as handle:
+            kind = TYPES.get(os.path.splitext(name)[1], "application/octet-stream")
+            return handle.read(), kind
+
     def do_GET(self):
         if self.path.startswith("/site"):
+            found = self._site_file()
             if self.server.suspended:
                 self._send(410, b"Suspended by the registrar (controlled test).", "text/plain")
+            elif found is None:
+                self._send(404, b"Not found.", "text/plain")
             else:
-                self._send(200, SITE, "text/html; charset=utf-8")
+                self._send(200, *found)
         elif self.path.startswith("/tickets/"):
             ticket = self.server.tickets.get(self.path.rsplit("/", 1)[-1])
             self._json(200, ticket) if ticket else self._json(404, {"error": "no such ticket"})

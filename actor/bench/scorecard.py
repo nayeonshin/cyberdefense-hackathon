@@ -8,7 +8,8 @@ W, PAD = 920, 24
 ACTIONS = ["feed", "urlscan", "netcraft", "abuseipdb", "notify_host", "notify_registrar",
            "mock_registrar", "confirm"]
 GROUPS = [("act", "should act"), ("withhold", "must not act"),
-          ("hostile", "hostile input"), ("lifecycle", "lifecycle")]
+          ("hostile", "hostile input"), ("lifecycle", "lifecycle"),
+          ("pipeline", "team pipeline")]
 
 STYLE = """
 .card{--surface:#fcfcfb;--tile:#f1f0ea;--ink:#0b0b0b;--ink2:#52514e;--muted:#898781;
