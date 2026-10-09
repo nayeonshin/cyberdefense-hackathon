@@ -26,6 +26,7 @@ For Docker, run `docker compose up --build` (Linux containers). The named volume
 - [Reference ClickHouse schema](integration/reference-schema.sql)
 - [Member 3 Actor documentation](actor/README.md)
 - [Full QA findings and validation](docs/QA_REPORT.md)
+- [Animated overview and rollout validation](docs/MOTION_ROLLOUT.md)
 
 ```mermaid
 flowchart LR
