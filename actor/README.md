@@ -1,19 +1,11 @@
 # Actor: autonomous action and dispatch (Member 3)
 
-![Actor bench drawing sheet: verdict stamp, scenario matrix, acceptance table and revision history](bench/scorecard.svg)
+![Actor bench scorecard](bench/scorecard.svg)
 
-The sheet is redrawn by `python -m actor.bench`. It runs 117 labelled scenarios through the
-real dispatcher with every outside channel replaced by a recorder.
-
-- **View A** shows every scenario against every action: a filled square was sent as required,
-  a blank was held back as required, anything red is a nonconformance.
-- **Acceptance** shows how the score is made up. One safety violation makes a run UNSAFE
-  whatever the score.
-- **Revisions** is the history of runs, and the stamp is the verdict of the latest one.
-
-Scenarios are in [bench/scenarios.yaml](bench/scenarios.yaml); `bench/scorecard.html` adds the
-list of nonconformances. The lettering is a subset of Routed Gothic (SIL Open Font License,
-see [bench/assets](bench/assets/LETTERING-LICENSE.txt)).
+The card above is rewritten by `python -m actor.bench`: 117 labelled scenarios run through the
+real dispatcher with every outside channel replaced by a recorder. One safety violation makes
+a run UNSAFE whatever its score. Details are in [bench/scenarios.yaml](bench/scenarios.yaml)
+and `bench/scorecard.html`.
 
 Takes a verified verdict and acts on it, one rung at a time. Every action writes a receipt.
 
@@ -82,6 +74,44 @@ asks ClickHouse what is already on record for the host, and the answer is used t
 
 The lookup runs on the table's sort key: 66 ms median from a laptop over 822,439 rows.
 
+## Stress test on the database
+
+The bench uses a stand-in table. `python -m actor.stress` runs the same code against the
+real ClickHouse service, on tables of its own (`stress_threats`, `stress_events`,
+`stress_actions`), with every outside channel replaced by a recorder.
+
+**Pipeline.** 3,000 real threat URLs are written as scanner verdicts in a mix of states,
+together with 22 rows no scanner should produce: path traversal in the event id,
+`javascript:` and `file:` URLs, a line break carrying a mail header, a 60,000 character
+URL, a missing confidence, private and cloud-metadata addresses, shared platforms, SQL in
+the query string. Then the Actor works the queue off and the database is checked.
+
+| Check | Result |
+|---|---|
+| Verified events handled | 2,583 of 2,583, none left behind |
+| Rows the scanner rejected or could not fetch | untouched |
+| Hostile rows that led to an action against their target | 0 |
+| Mail or IP report against a shared platform | 0 |
+| Receipts written and receipts found in ClickHouse | 10,411 and 10,411 |
+| Second run over the same table | 0 new receipts |
+
+The first run also showed the cost of one insert per receipt: 0.64 events per second.
+Receipts and outcomes now go to ClickHouse as one insert per pass and the history lookup as
+one query per pass, which brought the same 155 events from 242 s to 10 s.
+
+**History lookup at scale.** `python -m actor.stress lookups` asks for 400 hosts in the
+real table and in `threat_history_scale`, which holds the real rows plus synthetic sibling
+hosts: 1,000,085,824 rows, 147 GiB raw, 33 GiB stored.
+
+| Table | Rows | Server time, median / p99 | Rows read per lookup | From a laptop, median |
+|---|---|---|---|---|
+| `threat_history` | 822,439 | 4 ms / 5 ms | 14,812 | 77 ms |
+| `threat_history_scale` | 1,000,085,824 | 4 ms / 5 ms | 8,152 | 69 ms |
+
+All 400 hosts get the same answer from both tables. Quotes, SQL fragments, a null byte and
+a 5,000 character host return an empty record and no error. The last numbers are in
+[bench/stress.json](bench/stress.json).
+
 ## Live checks
 
 The bench proves the decisions with every channel replaced by a recorder. `actor/live.py`
@@ -94,8 +124,7 @@ python -m actor.live --full   # also pushes a self-test entry to the feed and re
 
 It checks ClickHouse (write and lookup), the Semgrep scanner on the demo page, urlscan.io,
 Netcraft's development endpoint, the public feed repository, the controlled target and the
-mail sink. Results land in `bench/live.json`, in the ClickHouse table `live_checks` and on
-sheet 2 of `bench/scorecard.html`.
+mail sink. Results land in `bench/live.json` and in the ClickHouse table `live_checks`.
 
 ## The whole pipeline
 

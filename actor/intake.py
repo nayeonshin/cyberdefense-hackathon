@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 
 import requests
 
-from . import config, policy as policy_module
+from . import config, history, policy as policy_module
 from .contract import DONE_STATUSES, Receipt, safe_id
 from .dispatch import dispatch, print_receipts
 from .ledger import Ledger, clickhouse_client
@@ -29,6 +29,7 @@ from .recheck import recheck_once
 TRUSTED_FEEDS = {"urlhaus", "openphish", "threatfox"}
 THREAT_TYPES = {"malware_download": "malware"}
 MAX_BATCH = 25                     # the brain's /scan/batch limit
+VERIFIED_BATCH = 200               # verdicts handled per pass: one read, one write each way
 
 VERDICTS_DDL = """
 CREATE TABLE IF NOT EXISTS verdicts (
@@ -108,7 +109,7 @@ EVENT_COLUMNS = ["event_id", "target_url", "timestamp", "semgrep_detected", "con
                  "evidence", "action_status", "proof_url"]
 
 
-def fetch_verified(client, limit: int = MAX_BATCH) -> list:
+def fetch_verified(client, limit: int = VERIFIED_BATCH) -> list:
     """Verdicts Member 2's worker marked VERIFIED and nobody has acted on yet."""
     query = (
         "SELECT e.event_id AS event_id, e.target_url AS target_url, e.timestamp AS event_time, "
@@ -121,15 +122,18 @@ def fetch_verified(client, limit: int = MAX_BATCH) -> list:
     return list(client.query(query).named_results())
 
 
-def write_back(client, row: dict, status: str, proof_url: str) -> None:
-    """Append the Actor's version of the event; the newest version is the current one."""
+def _version(row: dict, status: str, proof_url: str) -> list:
     when = row.get("event_time")
     if not isinstance(when, datetime):
         when = datetime.now(timezone.utc)
-    client.insert(verdicts_table(), [[
-        str(row["event_id"]), str(row["target_url"]), when,
-        bool(row.get("semgrep_detected")), row.get("confidence_score"), str(row.get("evidence") or ""),
-        status, proof_url]], column_names=EVENT_COLUMNS)
+    return [str(row["event_id"]), str(row["target_url"]), when,
+            bool(row.get("semgrep_detected")), row.get("confidence_score"), str(row.get("evidence") or ""),
+            status, proof_url]
+
+
+def write_back(client, row: dict, status: str, proof_url: str) -> None:
+    """Append the Actor's version of the event; the newest version is the current one."""
+    client.insert(verdicts_table(), [_version(row, status, proof_url)], column_names=EVENT_COLUMNS)
 
 
 def run_verified(client, live: bool = False, ledger: Ledger = None, policy: dict = None,
@@ -137,11 +141,33 @@ def run_verified(client, live: bool = False, ledger: Ledger = None, policy: dict
     """Act on the scanner's VERIFIED verdicts and record the outcome on the same event."""
     ledger = ledger or Ledger()
     policy = policy or policy_module.load()
-    receipts = []
-    for row in fetch_verified(client):
-        event_id = str(row["event_id"])
-        if skip is not None and event_id in skip:
-            continue
+    receipts, outcomes = [], []
+    rows = [r for r in fetch_verified(client) if skip is None or str(r["event_id"]) not in skip]
+    history.prime([history._host(str(r["target_url"])) for r in rows])
+    try:
+        with ledger.batch():
+            for row in rows:
+                mine = _act(row, live, ledger, policy)
+                receipts += mine
+                if skip is not None:
+                    skip.add(str(row["event_id"]))
+                if not live:
+                    continue
+                done = [r for r in mine if r.status in DONE_STATUSES and not r.dry_run]
+                public = [r.proof_url for r in done
+                          if r.proof_url.startswith("http") and "localhost" not in r.proof_url]
+                proof = (public or [r.proof_url for r in done if r.proof_url] or [""])[0]
+                outcomes.append(_version(row, "PUBLISHED_TAKEDOWN" if done else "WITHHELD", proof))
+    finally:        # what was handled is written back even when a later row stops the pass
+        if outcomes:
+            client.insert(verdicts_table(), outcomes, column_names=EVENT_COLUMNS)
+    return receipts
+
+
+def _act(row: dict, live: bool, ledger: Ledger, policy: dict) -> list:
+    """One verified row through the ladder. A failure in here must not block the rows behind it."""
+    event_id = str(row["event_id"])
+    try:
         threat = str(row.get("threat_type") or "phishing")
         verdict = {
             "event_id": event_id, "target_url": row["target_url"],
@@ -152,17 +178,12 @@ def run_verified(client, live: bool = False, ledger: Ledger = None, policy: dict
             "threat_type": THREAT_TYPES.get(threat, threat),
             "corroborated": str(row.get("feed_source") or "").lower() in TRUSTED_FEEDS,
         }
-        mine = dispatch(verdict, live=live, ledger=ledger, policy=policy)
-        receipts += mine
-        if skip is not None:
-            skip.add(event_id)
-        if not live:
-            continue
-        done = [r for r in mine if r.status in DONE_STATUSES and not r.dry_run]
-        public = [r.proof_url for r in done if r.proof_url.startswith("http") and "localhost" not in r.proof_url]
-        proof = (public or [r.proof_url for r in done if r.proof_url] or [""])[0]
-        write_back(client, row, "PUBLISHED_TAKEDOWN" if done else "WITHHELD", proof)
-    return receipts
+        return dispatch(verdict, live=live, ledger=ledger, policy=policy)
+    except Exception as exc:
+        refusal = Receipt(safe_id(event_id), "", "", "all", 0, "", "SKIPPED", dry_run=not live,
+                          detail=f"actor error, nothing sent: {type(exc).__name__}: {str(exc)[:200]}")
+        ledger.append(refusal)
+        return [refusal]
 
 
 def scan(events: list) -> list:
@@ -312,6 +333,11 @@ def main() -> None:
         own_scan = args.scan or bool(args.rows)
         step = run_once if own_scan else run_verified
         receipts = step(client, args.live, ledger, policy, skip=None if args.live else seen)
+        while receipts and args.live and not own_scan:      # a backlog is worked off in one go
+            more = step(client, args.live, ledger, policy)
+            if not more:
+                break
+            receipts += more
         receipts += follow_up(client, args.live, ledger, policy, verdict_rows=not own_scan)
         print_receipts(receipts) if receipts else print("nothing pending")
         if args.rows:

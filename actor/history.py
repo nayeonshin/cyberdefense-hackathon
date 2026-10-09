@@ -9,6 +9,7 @@ scanner verified this URL, what would the Actor do, and does it ever fall over? 
 sent; it is the parser and the rules of engagement only, with no DNS and no network.
 """
 import csv
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -44,6 +45,13 @@ CREATE TABLE IF NOT EXISTS replay_decisions (
 HISTORY_COLUMNS = ["source", "event_id", "url", "host", "threat_type", "first_seen"]
 REPLAY_COLUMNS = ["run_id", "source", "event_id", "host", "outcome", "actions", "reason"]
 BATCH = 50_000
+
+
+def history_table() -> str:
+    name = config.get("HISTORY_TABLE", "threat_history")
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]{0,80}", name):
+        raise ValueError("HISTORY_TABLE is not a plain table name")
+    return name
 
 
 def _host(url: str) -> str:
@@ -175,18 +183,48 @@ def lookup(host: str):
         return None
 
 
-def host_history(client, host: str) -> dict:
-    """What the history table knows about a host. One lookup on the table's sort key."""
-    started = time.perf_counter()
-    row = client.query(
-        # Only URLhaus rows carry a real date; the plain URL lists were stamped at load time.
-        "SELECT count(), minIf(first_seen, source = 'urlhaus'), maxIf(first_seen, source = 'urlhaus'), "
-        "arrayStringConcat(groupUniqArray(source), ', '), countIf(source = 'urlhaus') "
-        "FROM threat_history WHERE host = {host:String}", parameters={"host": host}).result_rows[0]
+# Only URLhaus rows carry a real date; the plain URL lists were stamped at load time.
+RECORD = ("count(), minIf(first_seen, source = 'urlhaus'), maxIf(first_seen, source = 'urlhaus'), "
+          "arrayStringConcat(arraySort(groupUniqArray(source)), ', '), countIf(source = 'urlhaus')")
+
+
+def _record(host: str, row, started: float) -> dict:
     return {"host": host, "urls_on_record": row[0],
             "first_seen": row[1].strftime("%Y-%m-%d") if row[4] else "",
             "last_seen": row[2].strftime("%Y-%m-%d") if row[4] else "",
             "sources": row[3], "lookup_ms": round((time.perf_counter() - started) * 1000, 1)}
+
+
+def host_history(client, host: str) -> dict:
+    """What the history table knows about a host. One lookup on the table's sort key."""
+    started = time.perf_counter()
+    row = client.query(f"SELECT {RECORD} FROM {history_table()} WHERE host = {{host:String}}",
+                       parameters={"host": host}).result_rows[0]
+    return _record(host, row, started)
+
+
+def prime(hosts: list) -> None:
+    """Look a whole batch of hosts up in one query, so the lookups that follow are answered here."""
+    global _client
+    hosts = sorted({h for h in hosts if h})
+    if not hosts or not config.flag("HISTORY_LOOKUP"):
+        return
+    try:
+        if _client is None:
+            _client = clickhouse_client()
+        if _client is None:
+            return
+        started = time.perf_counter()
+        rows = _client.query(
+            f"SELECT host, {RECORD} FROM {history_table()} WHERE host IN {{hosts:Array(String)}} "
+            "GROUP BY host", parameters={"hosts": hosts}).result_rows
+        found = {row[0]: _record(row[0], row[1:], started) for row in rows}
+        empty = (0, None, None, "", 0)
+        now = time.monotonic()
+        for host in hosts:
+            _recent[host] = (now, found.get(host) or _record(host, empty, started))
+    except Exception:
+        return
 
 
 def main() -> None:

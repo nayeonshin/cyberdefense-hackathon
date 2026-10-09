@@ -1,5 +1,7 @@
 """Append-only record of every action: a local JSONL file and, when configured, ClickHouse."""
+import contextlib
 import json
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -8,7 +10,7 @@ from . import config
 from .contract import DONE_STATUSES, Receipt
 
 DDL = """
-CREATE TABLE IF NOT EXISTS actions (
+CREATE TABLE IF NOT EXISTS {table} (
     event_id String,
     target_url String,
     domain String,
@@ -27,6 +29,13 @@ CREATE TABLE IF NOT EXISTS actions (
 
 COLUMNS = ["event_id", "target_url", "domain", "action", "rung", "recipient", "status",
            "proof_url", "evidence_sha256", "dry_run", "latency_ms", "detail", "created_at"]
+
+
+def actions_table() -> str:
+    name = config.get("ACTIONS_TABLE", "actions")
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]{0,80}", name):
+        raise ValueError("ACTIONS_TABLE is not a plain table name")
+    return name
 
 
 def _parse(ts: str) -> datetime:
@@ -57,6 +66,7 @@ class Ledger:
         self._rows = None            # loaded on first use, then kept in step by append()
         self._use_clickhouse = use_clickhouse
         self._table_ready = False
+        self._held = None            # rows waiting for one insert while batch() is open
 
     def _clickhouse(self):
         if not self._use_clickhouse:
@@ -64,7 +74,7 @@ class Ledger:
         if self._client is None:
             self._client = clickhouse_client()
         if self._client is not None and not self._table_ready:
-            self._client.command(DDL)
+            self._client.command(DDL.format(table=actions_table()))
             self._table_ready = True
         return self._client
 
@@ -73,14 +83,39 @@ class Ledger:
         self.all().append(row)
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(row) + "\n")
+        values = [row[c] for c in COLUMNS]
+        values[-1] = _parse(row["created_at"])
+        if self._held is not None:
+            self._held.append(values)
+        else:
+            self._insert([values])
+
+    def _insert(self, rows: list) -> None:
+        if not rows:
+            return
         try:
             client = self._clickhouse()
             if client is not None:
-                values = [row[c] for c in COLUMNS]
-                values[-1] = _parse(row["created_at"])
-                client.insert("actions", [values], column_names=COLUMNS)
+                client.insert(actions_table(), rows, column_names=COLUMNS)
         except Exception as exc:  # the local file stays the source of truth
             print(f"[ledger] ClickHouse insert failed: {exc}", file=sys.stderr)
+
+    @contextlib.contextmanager
+    def batch(self):
+        """Send the receipts written inside the block to ClickHouse as one insert.
+
+        One insert per receipt costs a round trip each and leaves one part each on the
+        server. The local file is still written receipt by receipt.
+        """
+        if self._held is not None:
+            yield
+            return
+        self._held = []
+        try:
+            yield
+        finally:
+            held, self._held = self._held, None
+            self._insert(held)
 
     @property
     def state_path(self) -> Path:
@@ -123,10 +158,11 @@ class Ledger:
                    for r in self._open_incident(domain))
 
     def count_recent(self, recipient: str, seconds: int = 3600) -> int:
-        cutoff = datetime.now(timezone.utc) - timedelta(seconds=seconds)
+        # Timestamps are fixed-width UTC text, so they compare in time order as strings.
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%S.%f")
         return sum(1 for r in self.all()
                    if r["recipient"] == recipient and r["status"] in DONE_STATUSES
-                   and not r["dry_run"] and _parse(r["created_at"]) >= cutoff)
+                   and not r["dry_run"] and r["created_at"] >= cutoff)
 
     def first_action_at(self, event_id: str):
         times = [_parse(r["created_at"]) for r in self.all()
