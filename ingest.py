@@ -25,6 +25,8 @@ Usage:
     python3 ingest.py --threat-type phishing  # only rows whose threat == phishing
     python3 ingest.py --resolve-dns           # best-effort DNS for hostnames (off by default)
     python3 ingest.py --dry-run               # fetch + map only, do not touch the DB
+    python3 ingest.py --feeds all             # urlhaus + openphish (phishing) + threatfox (C2/IOCs)
+    python3 ingest.py --feeds openphish,threatfox --limit 100   # --limit applies per feed
     python3 ingest.py --reset-schema          # DROP + recreate the table, then ingest
     python3 ingest.py --interval 600          # keep polling every 600 s (minimum 300)
     python3 ingest.py --self-test             # timestamp-parser self-check, no network
@@ -42,6 +44,7 @@ Environment (read from .env / clickhouse.env, or the process env):
 from __future__ import annotations
 
 import argparse
+import hashlib
 import ipaddress
 import logging
 import os
@@ -51,8 +54,9 @@ import sys
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 from urllib.parse import urlsplit
 
 import clickhouse_connect
@@ -69,6 +73,12 @@ ENV_FILE_CANDIDATES: tuple[str, ...] = (".env", "clickhouse.env")
 
 URLHAUS_RECENT_URL = "https://urlhaus-api.abuse.ch/v1/urls/recent/"
 URLHAUS_TIMEOUT_SECONDS = 30
+OPENPHISH_FEED_URL = "https://openphish.com/feed.txt"
+THREATFOX_API_URL = "https://threatfox-api.abuse.ch/api/v1/"
+FEED_TIMEOUT_SECONDS = 20
+THREATFOX_IOC_TYPES = frozenset({"url", "domain", "ip:port"})
+# ThreatFox `threat_type` -> normalized value; unknown values pass through lower-cased.
+THREATFOX_THREAT_MAP = {"botnet_cc": "c2", "payload_delivery": "malware_download"}
 # URLhaus `date_added` values are UTC. Live (measured 2026-10-09) they are
 # "2026-10-09 18:55:15 UTC" with a trailing zone marker; older docs showed the
 # bare form. ISO-8601 ("...T...") is accepted too. Both are tried.
@@ -530,6 +540,249 @@ def map_records(
 
 
 # --------------------------------------------------------------------------- #
+# Feed adapters (registry: FEEDS)
+# --------------------------------------------------------------------------- #
+
+
+class NothingMappedError(RuntimeError):
+    """A feed returned candidate records but none could be mapped (exit 3)."""
+
+
+@dataclass(frozen=True)
+class Feed:
+    """One feed adapter: `fetch(limit)` -> raw items, `map(raw, args)` -> rows.
+
+    Rows are tuples in COLUMN_NAMES order. `args` carries per-run options
+    (`limit`, `threat_type`, `resolve_dns`); only URLhaus uses the latter two.
+    """
+
+    name: str
+    fetch: Callable[[int], list[Any]]
+    map: Callable[[list[Any], argparse.Namespace], list[tuple[Any, ...]]]
+
+
+def _abuse_ch_key() -> str:
+    key = os.getenv("URLHAUS_AUTH_KEY", "").strip()
+    if not key:
+        raise RuntimeError(
+            "URLHAUS_AUTH_KEY is not set (the same abuse.ch Auth-Key is used for "
+            "ThreatFox); get one at https://auth.abuse.ch/"
+        )
+    return key
+
+
+# --- URLhaus: thin wrapper over the existing functions ---------------------- #
+
+
+def _fetch_urlhaus(limit: int) -> list[Any]:
+    return fetch_recent_urls()  # `limit` and the threat filter are applied in map
+
+
+def _map_urlhaus(raw: list[Any], args: argparse.Namespace) -> list[tuple[Any, ...]]:
+    log_threat_breakdown(raw, args.threat_type)
+    candidates = select_records(raw, args.limit, args.threat_type)
+    rows = map_records(
+        raw, args.limit, threat_type=args.threat_type, resolve_dns=args.resolve_dns
+    )
+    if candidates and not rows:
+        raise NothingMappedError(
+            f"Mapped 0/{len(candidates)} records although the feed returned "
+            f"{len(raw)} record(s) matching threat_type={args.threat_type!r} -- "
+            "every record failed validation. This is the signature of a "
+            "`date_added` format mismatch; refusing to report success."
+        )
+    if not candidates:
+        log.warning(
+            "No records match threat_type=%r in this poll (feed returned %d); "
+            "nothing to ingest",
+            args.threat_type,
+            len(raw),
+        )
+    return rows
+
+
+# --- OpenPhish --------------------------------------------------------------- #
+
+
+def _fetch_openphish(limit: int) -> list[Any]:
+    """Fetch the plain-text feed; returns [{'url', 'fetched_at'}] (first `limit`)."""
+    log.info("Fetching %s", OPENPHISH_FEED_URL)
+    try:
+        response = requests.get(OPENPHISH_FEED_URL, timeout=FEED_TIMEOUT_SECONDS)
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise RuntimeError(f"OpenPhish request failed: {exc}") from exc
+    fetched_at = datetime.now(timezone.utc).replace(microsecond=0)
+    lines = [ln.strip() for ln in response.text.splitlines() if ln.strip()]
+    log.info("OpenPhish returned %d line(s)", len(lines))
+    return [{"url": ln, "fetched_at": fetched_at} for ln in lines[:limit]]
+
+
+def map_openphish(raw: Sequence[Any]) -> list[tuple[Any, ...]]:
+    """Map OpenPhish items onto rows; blank/invalid URLs are skipped.
+
+    The feed carries no timestamp, so the fetch time (UTC) is used.
+    event_id = 'openphish-' + first 24 hex chars of sha256('openphish|' + url).
+    """
+    rows: list[tuple[Any, ...]] = []
+    skipped = 0
+    for item in raw:
+        url = str(item.get("url") or "").strip() if isinstance(item, dict) else ""
+        fetched_at = item.get("fetched_at") if isinstance(item, dict) else None
+        host = _host_of(url, is_url=True) if url else ""
+        if (
+            not host
+            or not url.lower().startswith(("http://", "https://"))
+            or not fetched_at
+        ):
+            skipped += 1
+            continue
+        digest = hashlib.sha256(f"openphish|{url}".encode("utf-8")).hexdigest()[:24]
+        rows.append(
+            (
+                f"openphish-{digest}",
+                url,
+                host,
+                host if is_ip_literal(host) else "",
+                fetched_at,
+                "phishing",
+                DEFAULT_TAKEDOWN_STATUS,
+                "openphish",
+            )
+        )
+    if skipped:
+        log.warning("OpenPhish: skipped %d blank/invalid line(s)", skipped)
+    return rows
+
+
+# --- ThreatFox --------------------------------------------------------------- #
+
+
+def _fetch_threatfox(limit: int) -> list[Any]:
+    """POST get_iocs(days=1); keep url/domain/ip:port IOCs, newest first, `limit`."""
+    log.info("Fetching %s (get_iocs, days=1)", THREATFOX_API_URL)
+    try:
+        response = requests.post(
+            THREATFOX_API_URL,
+            json={"query": "get_iocs", "days": 1},
+            headers={"Auth-Key": _abuse_ch_key()},
+            timeout=FEED_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except requests.RequestException as exc:
+        raise RuntimeError(f"ThreatFox request failed: {exc}") from exc
+    except ValueError as exc:
+        raise RuntimeError(f"ThreatFox returned non-JSON content: {exc}") from exc
+
+    if payload.get("query_status") != "ok" or not isinstance(payload.get("data"), list):
+        raise RuntimeError(
+            f"ThreatFox query_status={payload.get('query_status')!r}, "
+            f"data={type(payload.get('data')).__name__}"
+        )
+    data = payload["data"]
+    iocs = [
+        d
+        for d in data
+        if isinstance(d, dict) and d.get("ioc_type") in THREATFOX_IOC_TYPES
+    ]
+    iocs.sort(key=lambda d: str(d.get("first_seen") or ""), reverse=True)
+    log.info(
+        "ThreatFox returned %d IOC(s); %d of type url/domain/ip:port",
+        len(data),
+        len(iocs),
+    )
+    return iocs[:limit]
+
+
+def map_threatfox(raw: Sequence[Any]) -> list[tuple[Any, ...]]:
+    """Map ThreatFox IOCs (url, domain, ip:port) onto rows; others are skipped."""
+    rows: list[tuple[Any, ...]] = []
+    skipped = 0
+    families: Counter[str] = Counter()
+    for ioc in raw:
+        if not isinstance(ioc, dict):
+            skipped += 1
+            continue
+        ioc_id = str(ioc.get("id") or "").strip()
+        value = str(ioc.get("ioc") or "").strip()
+        ioc_type = ioc.get("ioc_type")
+        timestamp = parse_timestamp(ioc.get("first_seen"))
+        if not ioc_id or not value or timestamp is None:
+            skipped += 1
+            continue
+
+        if ioc_type == "url":
+            target_url = value
+            domain = _host_of(value, is_url=True)
+            ip = domain if is_ip_literal(domain) else ""
+        elif ioc_type == "domain":
+            domain = _host_of(value)
+            target_url = f"http://{domain}"
+            ip = domain if is_ip_literal(domain) else ""
+        elif ioc_type == "ip:port":
+            host, _, port = value.rpartition(":")
+            if not is_ip_literal(host) or not port.isdigit():
+                skipped += 1
+                continue
+            domain, ip = host, host
+            target_url = f"http://{host}:{port}"
+        else:
+            skipped += 1
+            continue
+        if not domain:
+            skipped += 1
+            continue
+
+        raw_threat = str(ioc.get("threat_type") or "").strip().lower()
+        threat = THREATFOX_THREAT_MAP.get(raw_threat, raw_threat or "unknown")
+        families[str(ioc.get("malware_printable") or ioc.get("malware") or "unknown")] += 1
+        rows.append(
+            (
+                f"threatfox-{ioc_id}",
+                target_url,
+                domain,
+                ip,
+                timestamp,
+                threat,
+                DEFAULT_TAKEDOWN_STATUS,
+                "threatfox",
+            )
+        )
+    if skipped:
+        log.warning("ThreatFox: skipped %d unsupported/malformed IOC(s)", skipped)
+    if families:
+        log.info(
+            "ThreatFox malware families: %s",
+            ", ".join(f"{n}={c}" for n, c in families.most_common(8)),
+        )
+    return rows
+
+
+FEEDS: dict[str, Feed] = {
+    "urlhaus": Feed("urlhaus", _fetch_urlhaus, _map_urlhaus),
+    "openphish": Feed("openphish", _fetch_openphish, lambda raw, _a: map_openphish(raw)),
+    "threatfox": Feed("threatfox", _fetch_threatfox, lambda raw, _a: map_threatfox(raw)),
+}
+DEFAULT_FEEDS = "urlhaus"
+
+
+def parse_feed_names(spec: str) -> list[str]:
+    """Turn a `--feeds` value ('all' or a comma list) into registry names."""
+    names = [n.strip().lower() for n in spec.split(",") if n.strip()]
+    if not names:
+        raise ValueError("--feeds must not be empty")
+    if "all" in names:
+        return list(FEEDS)
+    unknown = [n for n in names if n not in FEEDS]
+    if unknown:
+        raise ValueError(
+            f"unknown feed(s) {unknown}; choose from {', '.join(FEEDS)} or 'all'"
+        )
+    return list(dict.fromkeys(names))
+
+
+# --------------------------------------------------------------------------- #
 # Insert + verify
 # --------------------------------------------------------------------------- #
 
@@ -615,6 +868,95 @@ def report_table_state(
 # --------------------------------------------------------------------------- #
 
 
+def _feed_self_tests() -> tuple[int, int]:
+    """Offline checks for the OpenPhish and ThreatFox mappers -> (failures, total)."""
+    t = datetime(2026, 10, 9, 12, 0, 0, tzinfo=timezone.utc)
+    checks: list[tuple[str, bool]] = []
+
+    phish = map_openphish(
+        [
+            {"url": "https://Evil.Example.com/login?x=1", "fetched_at": t},
+            {"url": "", "fetched_at": t},
+            {"url": "not a url", "fetched_at": t},
+            {"url": "http://1.2.3.4/a", "fetched_at": t},
+        ]
+    )
+    checks.append(("openphish: blank/invalid skipped, 2 rows", len(phish) == 2))
+    checks.append(
+        (
+            "openphish: hostname row",
+            phish[0][1:] == (
+                "https://Evil.Example.com/login?x=1",
+                "evil.example.com",
+                "",
+                t,
+                "phishing",
+                "PENDING",
+                "openphish",
+            ),
+        )
+    )
+    checks.append(("openphish: IP host fills ip_address", phish[1][2:4] == ("1.2.3.4", "1.2.3.4")))
+    again = map_openphish([{"url": "http://1.2.3.4/a", "fetched_at": t}])
+    checks.append(("openphish: event_id stable", again[0][0] == phish[1][0]))
+    checks.append(("openphish: event_id format", phish[0][0].startswith("openphish-") and len(phish[0][0]) == 34))
+
+    def ioc(i: str, value: str, kind: str, threat: str) -> dict[str, Any]:
+        return {
+            "id": i,
+            "ioc": value,
+            "ioc_type": kind,
+            "threat_type": threat,
+            "malware_printable": "Fam",
+            "first_seen": "2026-10-09 19:45:48 UTC",
+        }
+
+    ts = datetime(2026, 10, 9, 19, 45, 48, tzinfo=timezone.utc)
+    tf = map_threatfox(
+        [
+            ioc("1", "http://bad.example.org/x.exe", "url", "payload_delivery"),
+            ioc("2", "c2.example.net", "domain", "botnet_cc"),
+            ioc("3", "94.158.187.147:25204", "ip:port", "botnet_cc"),
+            ioc("4", "d41d8cd98f00b204e9800998ecf8427e", "md5_hash", "payload"),
+        ]
+    )
+    checks.append(("threatfox: hash IOC skipped, 3 rows", len(tf) == 3))
+    checks.append(
+        (
+            "threatfox: url row",
+            tf[0] == ("threatfox-1", "http://bad.example.org/x.exe", "bad.example.org", "", ts, "malware_download", "PENDING", "threatfox"),
+        )
+    )
+    checks.append(
+        (
+            "threatfox: domain row + botnet_cc -> c2",
+            tf[1] == ("threatfox-2", "http://c2.example.net", "c2.example.net", "", ts, "c2", "PENDING", "threatfox"),
+        )
+    )
+    checks.append(
+        (
+            "threatfox: ip:port row",
+            tf[2] == ("threatfox-3", "http://94.158.187.147:25204", "94.158.187.147", "94.158.187.147", ts, "c2", "PENDING", "threatfox"),
+        )
+    )
+    checks.append(("threatfox: event_id stable", map_threatfox([ioc("1", "http://bad.example.org/x.exe", "url", "payload_delivery")])[0][0] == tf[0][0]))
+    checks.append(("parse_feed_names: all/list/unknown", parse_feed_names("all") == list(FEEDS) and parse_feed_names("openphish, threatfox") == ["openphish", "threatfox"] and _raises(ValueError, parse_feed_names, "nope")))
+
+    failures = 0
+    for label, ok in checks:
+        print(f"[{'PASS' if ok else 'FAIL'}] {label}")
+        failures += 0 if ok else 1
+    return failures, len(checks)
+
+
+def _raises(exc: type[BaseException], fn: Callable[..., Any], *a: Any) -> bool:
+    try:
+        fn(*a)
+    except exc:
+        return True
+    return False
+
+
 def run_self_test() -> int:
     """Minimal timestamp-parser self-check covering both documented formats.
 
@@ -640,7 +982,10 @@ def run_self_test() -> int:
         print(f"[{'PASS' if ok else 'FAIL'}] parse_timestamp({raw!r}) -> None")
         failures += 0 if ok else 1
 
-    print(f"self-test: {len(cases) + 4 - failures}/{len(cases) + 4} checks passed")
+    feed_failures, feed_total = _feed_self_tests()
+    failures += feed_failures
+    total = len(cases) + 4 + feed_total
+    print(f"self-test: {total - failures}/{total} checks passed")
     return 1 if failures else 0
 
 
@@ -658,6 +1003,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=int,
         default=DEFAULT_LIMIT,
         help=f"maximum records to take from the URLhaus array (default: {DEFAULT_LIMIT})",
+    )
+    parser.add_argument(
+        "--feeds",
+        default=DEFAULT_FEEDS,
+        help=(
+            "comma-separated feeds to ingest, or 'all' "
+            f"(choices: {', '.join(FEEDS)}; default: {DEFAULT_FEEDS}); --limit applies per feed"
+        ),
     )
     parser.add_argument(
         "--threat-type",
@@ -717,58 +1070,70 @@ EXIT_USAGE = 2
 EXIT_NOTHING_MAPPED = 3
 
 
+def _summary_line(name: str, stat: dict[str, Any]) -> str:
+    return (
+        f"[feed] {name}: fetched={stat['fetched']} mapped={stat['mapped']} "
+        f"new={stat['new']} duplicates={stat['duplicates']} error={stat['error'] or 'none'}"
+    )
+
+
 def run_once(args: argparse.Namespace, *, reset_schema: bool) -> int:
-    """One poll: fetch -> map -> dedup -> insert. Returns a process exit code."""
+    """One poll over the selected feeds: fetch -> map -> dedup -> insert.
+
+    Each feed runs in its own try/except, so one failing feed is logged and the
+    others still run. Exit code: 3 if any feed mapped nothing from a non-empty
+    fetch (parser regression), else 1 if every feed failed, else 0.
+    """
+    names: list[str] = getattr(args, "feed_names", None) or [DEFAULT_FEEDS]
+    stats: dict[str, dict[str, Any]] = {
+        n: {"fetched": 0, "mapped": 0, "new": 0, "duplicates": 0, "error": ""}
+        for n in names
+    }
+    staged: dict[str, list[tuple[Any, ...]]] = {}
+    nothing_mapped = False
     client = None
     try:
-        records = fetch_recent_urls()
-        log_threat_breakdown(records, args.threat_type)
-        candidates = select_records(records, args.limit, args.threat_type)
-        rows = map_records(
-            records,
-            args.limit,
-            threat_type=args.threat_type,
-            resolve_dns=args.resolve_dns,
-        )
+        for name in names:
+            feed, stat = FEEDS[name], stats[name]
+            try:
+                raw = feed.fetch(args.limit)
+                stat["fetched"] = len(raw)
+                rows = feed.map(raw, args)
+                stat["mapped"] = len(rows)
+                staged[name] = rows
+            except NothingMappedError as exc:
+                log.error("[%s] %s", name, exc)
+                stat["error"] = "nothing mapped"
+                nothing_mapped = True
+            except RuntimeError as exc:
+                log.error("[%s] %s", name, exc)
+                stat["error"] = str(exc)[:120]
+            except Exception as exc:  # noqa: BLE001 -- feed isolation by design
+                log.exception("[%s] unexpected failure", name)
+                stat["error"] = f"{type(exc).__name__}: {exc}"[:120]
 
-        if candidates and not rows:
-            log.error(
-                "Mapped 0/%d records although the feed returned %d record(s) "
-                "matching threat_type=%r -- every record failed validation. "
-                "This is the signature of a `date_added` format mismatch; "
-                "refusing to report success.",
-                len(candidates),
-                len(records),
-                args.threat_type,
-            )
-            return EXIT_NOTHING_MAPPED
-        if not candidates:
-            log.warning(
-                "No records match threat_type=%r in this poll (feed returned %d); "
-                "nothing to ingest",
-                args.threat_type,
-                len(records),
-            )
-
-        if args.dry_run:
-            log.info("Dry run: %d row(s) mapped, database untouched", len(rows))
-            for row in rows[:5]:
-                log.info("  %s", row)
-            if len(rows) > 5:
-                log.info("  ... and %d more", len(rows) - 5)
-            return EXIT_OK
-
-        client = connect_clickhouse()
-        ensure_schema(client, recreate=reset_schema)
-        fresh, duplicates = drop_duplicates(client, rows)
-        log.info("Dedup: %d new, %d duplicates skipped", len(fresh), duplicates)
-        inserted = insert_rows(client, fresh)
-        report_table_state(client)
-        log.info(
-            "Done: %d row(s) inserted, %d duplicate(s) skipped", inserted, duplicates
-        )
-        return EXIT_OK
-
+        if staged and args.dry_run:
+            for name, rows in staged.items():
+                stats[name]["new"] = stats[name]["duplicates"] = "n/a"
+                log.info("Dry run [%s]: %d row(s) mapped, database untouched", name, len(rows))
+                for row in rows[:5]:
+                    log.info("  %s", row)
+                if len(rows) > 5:
+                    log.info("  ... and %d more", len(rows) - 5)
+        elif staged:
+            client = connect_clickhouse()
+            ensure_schema(client, recreate=reset_schema)
+            for name, rows in staged.items():
+                stat = stats[name]
+                try:
+                    fresh, duplicates = drop_duplicates(client, rows)
+                    log.info("[%s] Dedup: %d new, %d duplicates skipped", name, len(fresh), duplicates)
+                    stat["new"] = insert_rows(client, fresh)
+                    stat["duplicates"] = duplicates
+                except Exception as exc:  # noqa: BLE001 -- feed isolation by design
+                    log.exception("[%s] database step failed", name)
+                    stat["error"] = f"{type(exc).__name__}: {exc}"[:120]
+            report_table_state(client)
     except RuntimeError as exc:
         log.error("%s", exc)
         return EXIT_RUNTIME
@@ -779,6 +1144,14 @@ def run_once(args: argparse.Namespace, *, reset_schema: bool) -> int:
         if client is not None:
             client.close()
             log.debug("ClickHouse connection closed")
+
+    for name in names:
+        print(_summary_line(name, stats[name]))
+    if nothing_mapped:
+        return EXIT_NOTHING_MAPPED
+    if all(stats[n]["error"] for n in names):
+        return EXIT_RUNTIME
+    return EXIT_OK
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -806,6 +1179,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return EXIT_USAGE
     if args.interval and args.dry_run:
         log.error("--interval and --dry-run cannot be combined")
+        return EXIT_USAGE
+
+    try:
+        args.feed_names = parse_feed_names(args.feeds)
+    except ValueError as exc:
+        log.error("%s", exc)
         return EXIT_USAGE
 
     load_environment()

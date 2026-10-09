@@ -28,6 +28,7 @@ docker compose up -d                       # ClickHouse on localhost:8123
 ```bash
 .venv/bin/python ingest.py --dry-run               # fetch + map only, DB untouched
 .venv/bin/python ingest.py                         # one-shot: 50 most recent records
+.venv/bin/python ingest.py --feeds all --limit 100 # urlhaus + openphish (phishing) + threatfox (C2); --limit is per feed
 .venv/bin/python ingest.py --reset-schema          # first run after a schema change: DROP + recreate
 .venv/bin/python ingest.py --threat-type phishing  # only one threat type (may legitimately be 0)
 .venv/bin/python ingest.py --limit 100 --resolve-dns
