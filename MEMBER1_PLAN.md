@@ -268,7 +268,7 @@ independently by the smoke test (re-insert of 7 known rows → 0 added).
 | Question | How fast can the ClickHouse layer absorb threat rows? | How fast do the real feeds actually deliver new threats? |
 | Data | Synthetic, deterministic (seeded), reserved `.invalid` domains / TEST-NET IPs, `feed_source='bench'` | Real URLhaus / OpenPhish / ThreatFox |
 | Path | The **real** `drop_duplicates` + `insert_rows`, one bulk insert per simulated poll, then the real `get_pending_targets()` | The daemon, end to end incl. network |
-| Where | Unique `incoming_threats_bench_<uuid>`, dropped afterwards; nothing written to `ingest_runs` | `ingest_runs` telemetry → `get_feed_stats()["throughput"]` |
+| Where | Isolated `incoming_threats_bench`, dropped afterwards; nothing written to `ingest_runs` | `ingest_runs` telemetry → `get_feed_stats()["throughput"]` |
 | Tested by | `tests/volume_test.py` §2 (floor: ≥ 10k rows/s, query p50 ≤ 2 s; overridable) | `tests/volume_test.py` §3 (rate maths, cold-start excluded) |
 
 **A. Capacity — measured 2026-10-09, local Docker, ClickHouse 26.9.14.10, 16-core laptop:**
