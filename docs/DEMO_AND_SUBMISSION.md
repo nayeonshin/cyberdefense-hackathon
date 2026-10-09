@@ -9,8 +9,8 @@ Semgrep; the latest CI run also writes and queries a real ClickHouse container.
 - Live: <https://rlts1sj4jhcur9q89cjbfn8omk.ingress.h6i-dedicated.eu-se-1.digitalfrontier.so/>
 - Akash DSEQ `1791578237742`, provider Digital Frontier, sponsor credits only, 24-hour runtime limit.
 - Actual cloud Semgrep-to-Actor run: **15.054 seconds**, one mock-registrar submission, HTTP 410.
-- [Redesign's 48 tests and real ClickHouse container run](https://github.com/nayeonshin/cyberdefense-hackathon/actions/runs/37987379983):
-  **12.649 seconds**, persisted ledger, new worker and fresh check after restart, one submitted receipt.
+- [Final QA: 67 tests and real ClickHouse container run](https://github.com/nayeonshin/cyberdefense-hackathon/actions/runs/37995734232):
+  **14.298 seconds**, persisted ledger, new worker and fresh check after restart, real database-outage recovery and forced worker-exit verification, one submitted receipt.
 - See [QA report](QA_REPORT.md) for subsequent tests and fixes; these timings describe the recorded runs above.
 - The cloud dashboard currently uses file storage. Member 1's localhost database is not reachable from Akash.
 - Guild AI sponsor execution is not yet independently verified. No final recording or submission exists yet.
@@ -54,7 +54,7 @@ observable workflow. ClickHouse stores events and receipts; Member 2’s Semgrep
 code evidence. A separate worker invokes Member 3’s dispatcher and rechecks the target without browser-driven
 action controls. Streamlit presents ingestion timing, scan results, and per-event action receipts. The container
 runs on Akash with persistent dispatch history. The cloud run completed in 15.054 seconds; a separate actual
-ClickHouse container run completed in 12.649 seconds and preserved one submission across restart. The cloud
+ClickHouse container run completed in 14.298 seconds and preserved one submission across restart and a database outage. The cloud
 currently uses file storage while a reachable external ClickHouse endpoint is pending. Our demo uses a harmless
 team-owned target and a private mock registrar; it does not claim that an external provider performed a real-world
 takedown. Guild AI usage is not claimed without Member 2's execution evidence.

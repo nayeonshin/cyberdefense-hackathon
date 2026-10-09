@@ -1,5 +1,7 @@
 # Ramp dashboard rollout evidence
 
+**Latest update:** the comprehensive QA fixes are deployed on the same lease and persistent volume. Image `94e119886ab8f82e24148ea19bb4d69421f0de57`, digest `sha256:1094b817920ab96217384a5d19361f8976addb4cccbdee66977c7485b7c99d57`; 67 Linux tests passed. The restarted cloud worker retained the original three receipts exactly. See [final QA evidence and current rollback](QA_REPORT.md). The sections below record the initial redesign rollout.
+
 Verified October 9, 2026. Image `e940bebe6ddb283c697ef19da69525900f626830`; digest `sha256:91714aed78a3d7a056a255ad102faea5715274425dd4ba408a77a6ad4a074c35`.
 
 - [Live dashboard](https://rlts1sj4jhcur9q89cjbfn8omk.ingress.h6i-dedicated.eu-se-1.digitalfrontier.so/)
