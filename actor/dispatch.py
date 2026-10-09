@@ -53,7 +53,7 @@ def run_plans(verdict: Verdict, enrichment: Enrichment, plans: list, live: bool,
         elif plan.action in MAIL_ACTIONS and ledger.count_recent(plan.recipient) >= limit:
             receipt.status = "SKIPPED"
             receipt.detail = f"rate limit of {limit} mails per hour reached for {plan.recipient}"
-        elif plan.action == "abuseipdb" and ledger.reported(plan.action, plan.recipient):
+        elif plan.action == "abuseipdb" and ledger.reported(plan.action, plan.recipient, verdict.host):
             receipt.status, receipt.detail = "SKIPPED", f"{plan.recipient} was already reported"
         else:
             started = time.perf_counter()

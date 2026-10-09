@@ -103,15 +103,24 @@ class Ledger:
                     self._rows = [json.loads(line) for line in handle if line.strip()]
         return self._rows
 
+    def _open_incident(self, domain: str) -> list:
+        """Receipts since this domain was last confirmed down: a returning site is a new case."""
+        rows, start = self.all(), 0
+        for i, r in enumerate(rows):
+            if r["domain"] == domain and r["status"] == "CONFIRMED_DOWN":
+                start = i + 1
+        return rows[start:]
+
     def done_actions(self, domain: str) -> frozenset:
-        """Actions that really went out for this domain (dry runs do not count)."""
-        return frozenset(r["action"] for r in self.all()
+        """Actions that really went out for this domain in its open incident."""
+        return frozenset(r["action"] for r in self._open_incident(domain)
                          if r["domain"] == domain and r["status"] in DONE_STATUSES
                          and not r["dry_run"])
 
-    def reported(self, action: str, recipient: str) -> bool:
+    def reported(self, action: str, recipient: str, domain: str) -> bool:
         return any(r["action"] == action and r["recipient"] == recipient
-                   and r["status"] in DONE_STATUSES and not r["dry_run"] for r in self.all())
+                   and r["status"] in DONE_STATUSES and not r["dry_run"]
+                   for r in self._open_incident(domain))
 
     def count_recent(self, recipient: str, seconds: int = 3600) -> int:
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=seconds)

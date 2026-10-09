@@ -713,3 +713,24 @@
     - followup: {up: false}
   expect: {feed: 1, urlscan: 1, netcraft: 1, abuseipdb: 1, notify_host: 1, confirm: 1}
   checks: {status: {pipeline-takedown-confirmed-1: TAKEN_DOWN}}
+
+# ---------------------------------------------------------------- added after the first live run
+- id: reoffender
+  group: lifecycle
+  title: A domain that was confirmed down and comes back is acted on again
+  steps:
+    - dispatch: {}
+    - recheck: {up: false}
+    - recheck: {up: false}
+    - dispatch: {verdict: {event_id: evt-reoffender-second}}
+  expect: {feed: 2, urlscan: 2, netcraft: 2, abuseipdb: 2, notify_host: 2, confirm: 1}
+
+- id: controlled-rerun
+  group: lifecycle
+  title: The controlled target can be reported again after a confirmed takedown
+  steps:
+    - dispatch: {verdict: {target_url: "http://localhost:8099/site/", controlled: true}}
+    - recheck: {up: false}
+    - recheck: {up: false}
+    - dispatch: {verdict: {event_id: evt-controlled-rerun-2, target_url: "http://localhost:8099/site/", controlled: true}}
+  expect: {mock_registrar: 2, notify_host: 2, confirm: 1}
