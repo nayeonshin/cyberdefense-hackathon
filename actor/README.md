@@ -2,7 +2,7 @@
 
 ![Actor bench drawing sheet: verdict stamp, scenario matrix, acceptance table and revision history](bench/scorecard.svg)
 
-The sheet is redrawn by `python -m actor.bench`. It runs 109 labelled scenarios through the
+The sheet is redrawn by `python -m actor.bench`. It runs 113 labelled scenarios through the
 real dispatcher with every outside channel replaced by a recorder.
 
 - **View A** shows every scenario against every action: a filled square was sent as required,
@@ -41,6 +41,39 @@ Needs `requests`, `pyyaml` and `clickhouse-connect`. Copy `.env.example` to `.en
 
 Nothing is sent without `--live`, and each outside channel also needs its own `LIVE_*=1`.
 A file named `STOP` in the repo root halts every action.
+
+## Tested on real threat data
+
+The bench scenarios are hand-written. `actor/history.py` checks the same code on real data:
+822,439 threat URLs (URLhaus last 30 days, OpenPhish, Phishing.Database) loaded into
+ClickHouse and replayed through the Actor's parser and rules of engagement. Nothing is sent.
+
+```bash
+python -m actor.history load urlhaus_recent.csv openphish.txt phishing_active.txt
+python -m actor.history replay
+python -m actor.history lookup loginmicrosoftonlne.com
+```
+
+| | First replay | After the fixes |
+|---|---|---|
+| Crashes | 0 | 0 |
+| Refused as malformed | 620 | 3 |
+| Reported per URL only (shared platform) | not counted | 110,705 |
+
+What the real data changed:
+
+- 617 live phishing sites use an underscore in the host name (`uphold_login...`). The parser
+  refused them. They are accepted now.
+- 13 percent of the URLs sit on shared platforms. Public IPFS gateways and storage APIs were
+  among the busiest hosts and were not on the allowlist, so the Actor would have blocked a
+  whole gateway. They are on it now.
+
+Both findings became bench scenarios first, then fixes.
+
+The same table feeds the reports. With `HISTORY_LOOKUP=1` every evidence bundle, incident
+page and abuse mail states what is already on record for the host, for example
+"1023 malicious URLs on record for this host (phishing-database)". The lookup runs on the
+table's sort key: 66 ms median from a laptop over 822,439 rows.
 
 ## Live checks
 

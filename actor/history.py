@@ -173,11 +173,13 @@ def host_history(client, host: str) -> dict:
     """What the history table knows about a host. One lookup on the table's sort key."""
     started = time.perf_counter()
     row = client.query(
-        "SELECT count(), min(first_seen), max(first_seen), arrayStringConcat(groupUniqArray(source), ', ') "
+        # Only URLhaus rows carry a real date; the plain URL lists were stamped at load time.
+        "SELECT count(), minIf(first_seen, source = 'urlhaus'), maxIf(first_seen, source = 'urlhaus'), "
+        "arrayStringConcat(groupUniqArray(source), ', '), countIf(source = 'urlhaus') "
         "FROM threat_history WHERE host = {host:String}", parameters={"host": host}).result_rows[0]
     return {"host": host, "urls_on_record": row[0],
-            "first_seen": row[1].strftime("%Y-%m-%d") if row[0] else "",
-            "last_seen": row[2].strftime("%Y-%m-%d") if row[0] else "",
+            "first_seen": row[1].strftime("%Y-%m-%d") if row[4] else "",
+            "last_seen": row[2].strftime("%Y-%m-%d") if row[4] else "",
             "sources": row[3], "lookup_ms": round((time.perf_counter() - started) * 1000, 1)}
 
 

@@ -33,8 +33,11 @@ def on_record(bundle: dict) -> str:
     history = bundle.get("history")
     if not history:
         return ""
-    return (f"{history['urls_on_record']} malicious URLs on record for this host, "
-            f"{history['first_seen']} to {history['last_seen']} ({history['sources']})")
+    count = history["urls_on_record"]
+    text = f"{count} malicious URL{'s' if count != 1 else ''} on record for this host ({history['sources']})"
+    if history["first_seen"]:
+        text += f", dated {history['first_seen']} to {history['last_seen']}"
+    return text
 
 
 def _base(verdict: Verdict, enrichment: Enrichment) -> dict:
