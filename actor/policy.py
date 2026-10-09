@@ -4,6 +4,7 @@ from pathlib import Path
 
 import yaml
 
+from . import config
 from .contract import Verdict
 from .enrich import Enrichment, is_internal, is_ip
 
@@ -27,7 +28,10 @@ class Decision:
 
 
 def load(path: Path = POLICY_PATH) -> dict:
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
+    policy = yaml.safe_load(path.read_text(encoding="utf-8"))
+    extra = [h.strip().lower() for h in config.get("CONTROLLED_HOSTS").split(",") if h.strip()]
+    policy["controlled_hosts"] = policy["controlled_hosts"] + extra
+    return policy
 
 
 def is_allowlisted(host: str, policy: dict) -> bool:

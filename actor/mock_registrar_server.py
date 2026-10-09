@@ -8,6 +8,7 @@ GET  /tickets/<id>   the ticket as JSON (the receipt)
 POST /reset          brings the site back for the next run
 """
 import json
+import os
 import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -80,9 +81,10 @@ class Handler(BaseHTTPRequestHandler):
             if "/site" not in str(report.get("url", "")):
                 return self._json(400, {"error": "url is not hosted here"})
             ticket_id = f"T-{len(self.server.tickets) + 1:04d}"
-            host, port = self.server.server_address[:2]
+            base = os.environ.get("PUBLIC_URL", "").rstrip("/") or (
+                "http://" + self.headers.get("Host", "localhost"))
             ticket = {"ticket": ticket_id, "result": "site suspended", **report,
-                      "receipt_url": f"http://localhost:{port}/tickets/{ticket_id}"}
+                      "receipt_url": f"{base}/tickets/{ticket_id}"}
             self.server.tickets[ticket_id] = ticket
             self.server.suspended = True
             self._json(200, ticket)
@@ -90,11 +92,11 @@ class Handler(BaseHTTPRequestHandler):
             self._json(404, {"error": "not found"})
 
 
-def make_server(port: int = 8099) -> Registrar:
-    return Registrar(("127.0.0.1", port))
+def make_server(port: int = 8099, host: str = "127.0.0.1") -> Registrar:
+    return Registrar((host, port))
 
 
 if __name__ == "__main__":
-    server = make_server()
-    print("controlled target on http://localhost:8099/site  (Ctrl+C to stop)")
+    server = make_server(int(os.environ.get("PORT", "8099")), os.environ.get("HOST", "127.0.0.1"))
+    print("controlled target on port %d, path /site  (Ctrl+C to stop)" % server.server_address[1])
     server.serve_forever()

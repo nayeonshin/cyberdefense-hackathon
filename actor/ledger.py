@@ -36,7 +36,7 @@ def _parse(ts: str) -> datetime:
 def clickhouse_client():
     """A client when CLICKHOUSE_HOST is set, otherwise None."""
     host = config.get("CLICKHOUSE_HOST")
-    if not host:
+    if not host or not config.get("CLICKHOUSE_PASSWORD"):
         return None
     import clickhouse_connect
     return clickhouse_connect.get_client(
