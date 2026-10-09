@@ -196,3 +196,18 @@ def test_atomic_storage_retries_windows_reader_lock(tmp_path, monkeypatch):
     assert read_json(target)["status"] == "running"
     assert len(calls) == 3
     assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_confirmation_from_previous_process_is_historical_after_restart():
+    from datetime import datetime, timedelta, timezone
+    from shipper.model import current_confirmation
+    old_start = (datetime.now(timezone.utc) - timedelta(seconds=10)).isoformat()
+    fresh_start = now_iso()
+    check = {"checked_at": now_iso(), "started_at": old_start}
+    heartbeat = {"started_at": old_start}
+    assert current_confirmation(check, heartbeat)
+    assert not current_confirmation(check, heartbeat, fresh_start)
+    heartbeat["started_at"] = fresh_start
+    assert not current_confirmation(check, heartbeat, fresh_start)
+    check["started_at"] = fresh_start
+    assert current_confirmation(check, heartbeat, fresh_start)

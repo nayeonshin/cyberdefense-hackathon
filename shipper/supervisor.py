@@ -11,6 +11,7 @@ from .storage import write_json
 
 def main():
     settings = Settings.from_env()
+    os.environ["SHIPPER_STARTED_AT"] = now_iso()
     commands = {"worker": [sys.executable, "-m", "shipper.worker"],
                 "dashboard": [sys.executable, "-m", "streamlit", "run", "dashboard.py", "--server.address=0.0.0.0",
                               "--server.port=" + os.getenv("PORT", "8501"), "--server.headless=true"]}

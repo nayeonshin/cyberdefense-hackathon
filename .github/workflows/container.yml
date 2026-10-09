@@ -55,8 +55,9 @@ jobs:
           done
           curl -fsS http://localhost:8501/_stcore/health
           docker exec demo python -m shipper.verify_run --wait 150 --output /data/verification.json
+          previous_start=$(docker exec demo python -c "import json; print(json.load(open('/data/runs/ci-controlled/heartbeat.json'))['started_at'])")
           docker restart demo
-          docker exec demo python -m shipper.verify_run --wait 45 --output /data/verification-after-restart.json
+          docker exec demo python -m shipper.verify_run --wait 45 --previous-started-at "$previous_start" --output /data/verification-after-restart.json
           mkdir -p controlled-evidence
           docker cp demo:/data/verification.json controlled-evidence/verification.json
           docker cp demo:/data/verification-after-restart.json controlled-evidence/verification-after-restart.json

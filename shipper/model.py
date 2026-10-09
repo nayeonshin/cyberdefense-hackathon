@@ -79,3 +79,11 @@ def receipt_label(receipt):
         return "Preview only"
     return {"SENT": "Submitted", "SINK": "Saved test message", "CONFIRMED_DOWN": "Probe-confirmed unavailability",
             "PLANNED": "Planned", "SKIPPED": "Skipped", "FAILED": "Failed", "STILL_UP": "Still reachable"}.get(receipt.get("status"), "Unknown")
+
+
+def current_confirmation(check, heartbeat, not_before=None):
+    checked, started = parse_time(check.get("checked_at")), parse_time(heartbeat.get("started_at"))
+    boundary = parse_time(not_before)
+    return bool(checked and started and (not boundary or started >= boundary)
+        and check.get("started_at") == heartbeat.get("started_at")
+        and 0 <= (datetime.now(timezone.utc) - checked).total_seconds() < 15)

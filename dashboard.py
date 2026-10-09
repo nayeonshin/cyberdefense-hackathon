@@ -1,11 +1,12 @@
 """Read-only presentation: importing this module never starts a worker."""
 import time
+import os
 from datetime import datetime, timezone
 from urllib.parse import urlencode
 import pandas as pd
 import streamlit as st
 from shipper.data import make_source
-from shipper.model import defang, parse_time, public_proof, receipt_label, scan_label
+from shipper.model import current_confirmation, defang, parse_time, public_proof, receipt_label, scan_label
 from shipper.settings import Settings
 from shipper.storage import read_json
 
@@ -76,7 +77,10 @@ def live_panels():
     updated = parse_time(heartbeat.get("updated_at"))
     age = (datetime.now(timezone.utc) - updated).total_seconds() if updated else None
     status = heartbeat.get("status", "not connected")
-    if age is None or age > 15:
+    boot = parse_time(os.getenv("SHIPPER_STARTED_AT"))
+    worker_start = parse_time(heartbeat.get("started_at"))
+    old_worker = bool(boot and (not worker_start or worker_start < boot))
+    if age is None or age > 15 or old_worker:
         st.warning("Worker heartbeat unavailable or stale. The page cannot confirm pipeline activity.")
     elif status in {"degraded", "paused", "stopped"}:
         st.warning(f"Worker {status}: {heartbeat.get('detail', '')}")
@@ -144,12 +148,17 @@ def live_panels():
             st.json(event)
     with right:
         st.subheader("Action receipts")
+        check = read_json(settings.run_dir / "target-check.json", {})
+        current = current_confirmation(check, heartbeat, os.getenv("SHIPPER_STARTED_AT"))
         matching = [r for r in receipts if r["event_id"] == selected]
         if not matching:
             st.info("No receipt yet. The dashboard does not initiate dispatch.")
         for index, receipt in enumerate(matching):
             with st.container(border=True):
-                st.write(f"**{receipt_label(receipt)}** · {receipt['action']}")
+                label = receipt_label(receipt)
+                if receipt.get("status") == "CONFIRMED_DOWN" and settings.mode == "controlled" and not current:
+                    label += " (historical)"
+                st.write(f"**{label}** · {receipt['action']}")
                 st.caption(str(receipt["created_at"]))
                 st.text(receipt.get("detail", ""))
                 proof = public_proof(receipt.get("proof_url", ""))
@@ -160,11 +169,8 @@ def live_panels():
                     st.caption("Saved receipt view; this is not an external provider confirmation.")
                 with st.expander("Receipt details"):
                     st.json(receipt)
-        check = read_json(settings.run_dir / "target-check.json", {})
         if check and event["target_url"] == settings.controlled_url:
-            checked = parse_time(check.get("checked_at"))
-            fresh = checked and (datetime.now(timezone.utc) - checked).total_seconds() < 15
-            if fresh and check.get("started_at") == heartbeat.get("started_at"):
+            if current:
                 st.caption(f"Controlled target: HTTP {check['http_status']} · checked {check['checked_at']}")
             else:
                 st.warning("Previous target confirmation is historical; waiting for a fresh check.")

@@ -9,12 +9,14 @@ from .settings import Settings
 from .storage import read_json, read_jsonl, write_json
 
 
-def inspect_run(settings):
+def inspect_run(settings, previous_started_at=None):
     records = read_json(settings.run_dir / "events.json", [])
     findings = read_json(settings.run_dir / "scan-findings.json", {})
     receipts = read_jsonl(settings.run_dir / "actions.jsonl")
     check = read_json(settings.run_dir / "target-check.json", {})
     heartbeat = read_json(settings.run_dir / "heartbeat.json", {})
+    if previous_started_at and heartbeat.get("started_at") == previous_started_at:
+        return None  # Wait for this restart's worker, not the old files on disk.
     if not records or not findings.get("findings"):
         return None
     event, meta = records[0]["event"], records[0]["metadata"]
@@ -51,20 +53,22 @@ def inspect_run(settings):
         "scanner": "semgrep", "findings": len(findings["findings"]), "submitted_receipts": len(sent),
         "confirmed_suspension": True, "http_status": 410, "elapsed_seconds": round(elapsed, 3),
         "within_recording_window": 0 <= elapsed <= 180, "data_source": settings.source,
-        "clickhouse_verified": database_verified, "checked_at": check["checked_at"]}
+        "clickhouse_verified": database_verified, "checked_at": check["checked_at"],
+        "worker_started_at": heartbeat["started_at"]}
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--wait", type=int, default=150)
     parser.add_argument("--output")
+    parser.add_argument("--previous-started-at")
     args = parser.parse_args()
     settings = Settings.from_env()
     if settings.mode != "controlled" or settings.source == "fixtures":
         raise SystemExit("A real controlled run is required")
     deadline = time.monotonic() + args.wait
     while time.monotonic() < deadline:
-        result = inspect_run(settings)
+        result = inspect_run(settings, args.previous_started_at)
         if result:
             if not result["within_recording_window"]:
                 raise SystemExit("Controlled run exceeded 180 seconds")
