@@ -1,0 +1,92 @@
+# Rules for code served by suspected malicious sites.
+# metadata.threat_category labels the site; metadata.weight feeds the confidence score
+# (quoted, because Semgrep rejects float values in rule YAML).
+# metadata.cross_origin_only: the finding is dropped when the URL it matched is on the page's own site.
+rules:
+  - id: cross-origin-credential-post
+    languages: [javascript]
+    severity: ERROR
+    message: Form data is sent to a hard-coded external URL
+    metadata:
+      threat_category: credential_harvester
+      weight: "0.6"
+      cross_origin_only: true
+    patterns:
+      - pattern-either:
+          - pattern: 'fetch("$URL", {..., body: $BODY, ...})'
+          - pattern: navigator.sendBeacon("$URL", ...)
+          - pattern: $XHR.open("POST", "$URL", ...)
+          - pattern: $.post("$URL", ...)
+      - metavariable-regex:
+          metavariable: $URL
+          regex: ^https?://
+
+  - id: telegram-bot-exfil
+    languages: [regex]
+    severity: ERROR
+    message: Data is sent to a Telegram bot, a common phishing-kit drop
+    metadata:
+      threat_category: credential_harvester
+      weight: "0.7"
+    # The token is often concatenated in, so allow anything short between "bot" and the method.
+    pattern-regex: api\.telegram\.org/bot[\s\S]{0,120}?/send(Message|Document)
+
+  - id: fake-login-form
+    languages: [regex]
+    severity: ERROR
+    message: A password form submits to an absolute URL
+    metadata:
+      threat_category: credential_harvester
+      weight: "0.6"
+      cross_origin_only: true
+    paths:
+      include:
+        - "*.html"
+    pattern-regex: <form[^>]*\baction\s*=\s*["']https?://[^"']+["'][^>]*>[\s\S]{0,3000}?type\s*=\s*["']password["']
+
+  - id: obfuscated-loader
+    languages: [javascript]
+    severity: WARNING
+    message: Code is decoded and executed at runtime
+    metadata:
+      threat_category: obfuscated_loader
+      weight: "0.4"
+    pattern-either:
+      - pattern: eval(atob(...))
+      - pattern: eval(unescape(...))
+      - pattern: eval(String.fromCharCode(...))
+      - pattern: new Function(atob(...))
+      - pattern: Function(atob(...))
+      - pattern: document.write(atob(...))
+      - pattern: document.write(unescape(...))
+
+  - id: obfuscated-redirect
+    languages: [javascript]
+    severity: WARNING
+    message: The page redirects to a destination that is decoded at runtime
+    metadata:
+      threat_category: obfuscated_redirect
+      weight: "0.3"
+    pattern-either:
+      - pattern: window.location = atob(...)
+      - pattern: window.location.href = atob(...)
+      - pattern: location.href = atob(...)
+      - pattern: document.location = atob(...)
+      - pattern: window.location.replace(atob(...))
+      - pattern: location.replace(atob(...))
+      - pattern: window.location = String.fromCharCode(...)
+      - pattern: location.href = String.fromCharCode(...)
+      - pattern: window.location = unescape(...)
+      - pattern: location.href = unescape(...)
+
+  - id: shell-dropper
+    languages: [regex]
+    severity: ERROR
+    message: Script downloads a file, makes it executable and runs it
+    metadata:
+      threat_category: malware_dropper
+      weight: "0.7"
+    paths:
+      include:
+        - "*.sh"
+    pattern-regex: (wget|curl)\s[^\n]*https?://[\s\S]{0,300}?chmod\s+(\+x|[0-7]{3})[\s\S]{0,300}?(\./|\bsh\s|\bbash\s)

@@ -1,0 +1,18 @@
+{
+  "event_id": "evt-demo-benign",
+  "target_url": "https://www.acmebank.example/login",
+  "timestamp": "2026-10-09T18:00:00Z",
+  "semgrep_detected": false,
+  "confidence_score": 0.0,
+  "evidence": "No Semgrep rule matched",
+  "action_status": "REJECTED",
+  "proof_url": "",
+  "findings": [],
+  "listed_on_feed": false,
+  "sources": [
+    {
+      "file": "inline_0.js",
+      "content": "document.querySelector(\"form\").addEventListener(\"submit\", async (e) => {\n  e.preventDefault();\n  const data = new FormData(e.target);\n  const res = await fetch(\"https://auth.acmebank.example/session\", { method: \"POST\", body: data });\n  if (res.ok) window.location = \"/dashboard\";\n});\n"
+    }
+  ]
+}

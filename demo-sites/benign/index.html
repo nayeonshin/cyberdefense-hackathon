@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Acme Bakery - Member Sign In</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #fff8ef; display: grid; place-items: center; height: 100vh; margin: 0; }
+    form { background: #fff; padding: 32px; border-radius: 8px; width: 300px; box-shadow: 0 2px 12px #0002; }
+    input, button { width: 100%; padding: 10px; margin-top: 12px; box-sizing: border-box; }
+  </style>
+</head>
+<body>
+  <!-- DEMO ONLY: a legitimate lookalike. Its name resembles the brand but it does nothing malicious. -->
+  <form id="login" method="post" action="/session">
+    <h1>Acme Bakery</h1>
+    <input id="email" type="email" name="email" placeholder="Email">
+    <input id="password" type="password" name="password" placeholder="Password">
+    <button>Sign in</button>
+  </form>
+  <script>
+    document.querySelector("#login").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const res = await fetch("/session", { method: "POST", body: new FormData(e.target) });
+      if (res.ok) window.location = "/orders";
+    });
+  </script>
+</body>
+</html>
