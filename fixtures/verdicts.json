@@ -1,0 +1,51 @@
+[
+  {
+    "event_id": "evt-10928",
+    "target_url": "https://example.com/login/verify",
+    "timestamp": "2026-10-09T18:00:00Z",
+    "semgrep_detected": true,
+    "confidence_score": 0.96,
+    "evidence": "Semgrep rule `credential-stealer` matched lines 42-48",
+    "action_status": "PENDING",
+    "proof_url": "",
+    "corroborated": true,
+    "simulated": true
+  },
+  {
+    "event_id": "evt-10929",
+    "target_url": "https://secure-update.example/account",
+    "timestamp": "2026-10-09T18:01:00Z",
+    "semgrep_detected": true,
+    "confidence_score": 0.92,
+    "evidence": "Semgrep rule `hidden-login-form` matched lines 10-19",
+    "simulated": true
+  },
+  {
+    "event_id": "evt-10930",
+    "target_url": "https://sites.google.com/view/fake-invoice",
+    "timestamp": "2026-10-09T18:02:00Z",
+    "semgrep_detected": true,
+    "confidence_score": 0.97,
+    "evidence": "Semgrep rule `obfuscated-redirect` matched line 7",
+    "corroborated": true,
+    "simulated": true
+  },
+  {
+    "event_id": "evt-10931",
+    "target_url": "https://maybe-fine.example/",
+    "timestamp": "2026-10-09T18:03:00Z",
+    "semgrep_detected": true,
+    "confidence_score": 0.62,
+    "evidence": "Semgrep rule `suspicious-eval` matched line 3",
+    "simulated": true
+  },
+  {
+    "event_id": "evt-10932",
+    "target_url": "https://clean.example/",
+    "timestamp": "2026-10-09T18:04:00Z",
+    "semgrep_detected": false,
+    "confidence_score": 0.05,
+    "evidence": "",
+    "simulated": true
+  }
+]

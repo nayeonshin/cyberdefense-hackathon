@@ -1,0 +1,109 @@
+name: Test and publish Member 4 image
+on:
+  push:
+    branches: [member4-shipper]
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest -q
+      - name: Configure public Docker Hub cache
+        run: |
+          sudo python3 - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path('/etc/docker/daemon.json')
+          config = json.loads(path.read_text()) if path.exists() else {}
+          config['registry-mirrors'] = ['https://mirror.gcr.io']
+          path.write_text(json.dumps(config))
+          PY
+          sudo systemctl restart docker
+          # Public dependencies don't require the runner's Docker Hub credentials.
+          docker logout docker.io
+      - uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        id: image
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: ghcr.io/nayeonshin/cyberdefense-hackathon:${{ github.sha }}
+      - name: Container smoke and persistence test
+        run: |
+          docker network create demo-net
+          ci_clickhouse_image=clickhouse/clickhouse-server:25.8@sha256:0152dd511befe6a2c2ef53e930726179669b08116da78500b37c51c96ff5ee77
+          if docker pull "mirror.gcr.io/$ci_clickhouse_image"; then
+            docker tag "mirror.gcr.io/$ci_clickhouse_image" clickhouse-ci:verified
+          else
+            docker pull "$ci_clickhouse_image"
+            docker tag "$ci_clickhouse_image" clickhouse-ci:verified
+          fi
+          docker run -d --name clickhouse-ci --network demo-net \
+            -e CLICKHOUSE_USER=demo -e CLICKHOUSE_PASSWORD=ci-only \
+            -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 \
+            clickhouse-ci:verified
+          for attempt in $(seq 1 30); do
+            if docker exec clickhouse-ci clickhouse-client --user demo --password ci-only --query 'SELECT 1'; then break; fi
+            sleep 2
+          done
+          docker exec clickhouse-ci clickhouse-client --user demo --password ci-only --query 'SELECT 1'
+          docker run -d --name demo --network demo-net -p 8501:8501 -v demo-data:/data \
+            -e DATA_SOURCE=clickhouse -e EVENTS_TABLE=shipper_events \
+            -e CLICKHOUSE_HOST=clickhouse-ci -e CLICKHOUSE_PORT=8123 \
+            -e CLICKHOUSE_USER=demo -e CLICKHOUSE_PASSWORD=ci-only -e CLICKHOUSE_SECURE=0 \
+            -e RUN_MODE=controlled -e RUN_ID=ci-controlled \
+            -e 'TEAM_PIPELINE_COMMAND_JSON=["python","-m","shipper.team_pipeline"]' \
+            ghcr.io/nayeonshin/cyberdefense-hackathon:${{ github.sha }}
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://localhost:8501/_stcore/health; then break; fi
+            sleep 2
+          done
+          curl -fsS http://localhost:8501/_stcore/health
+          docker exec demo python -m shipper.verify_run --wait 150 --output /data/verification.json
+          previous_start=$(docker exec demo python -c "import json; print(json.load(open('/data/runs/ci-controlled/heartbeat.json'))['started_at'])")
+          docker restart demo
+          docker exec demo python -m shipper.verify_run --wait 45 --previous-started-at "$previous_start" --output /data/verification-after-restart.json
+          # An actual dependency outage must be visible and recover without new actions.
+          docker stop clickhouse-ci
+          docker exec demo python -c "import json,time; from pathlib import Path; p=Path('/data/runs/ci-controlled/heartbeat.json'); deadline=time.monotonic()+45; exec('while time.monotonic()<deadline:\n if json.loads(p.read_text()).get(\"status\")==\"degraded\": break\n time.sleep(1)\nelse: raise SystemExit(\"worker did not expose ClickHouse outage\")')"
+          docker cp demo:/data/runs/ci-controlled/heartbeat.json /tmp/outage-heartbeat.json
+          docker start clickhouse-ci
+          docker exec demo python -m shipper.verify_run --wait 60 --output /data/verification-after-outage.json
+          mkdir -p controlled-evidence
+          cp /tmp/outage-heartbeat.json controlled-evidence/outage-heartbeat.json
+          docker cp demo:/data/verification.json controlled-evidence/verification.json
+          docker cp demo:/data/verification-after-restart.json controlled-evidence/verification-after-restart.json
+          docker cp demo:/data/verification-after-outage.json controlled-evidence/verification-after-outage.json
+          for file in events.json scan-findings.json actions.jsonl target-check.json; do
+            docker cp demo:/data/runs/ci-controlled/$file controlled-evidence/$file
+          done
+          docker logs demo
+          # A hard worker exit must fail the container and save its cause.
+          docker exec demo python -c "import os,signal; from pathlib import Path; workers=[int(p.name) for p in Path('/proc').iterdir() if p.name.isdigit() and (p/'cmdline').exists() and b'shipper.worker' in (p/'cmdline').read_bytes().split(bytes([0]))]; assert len(workers)==1,workers; os.kill(workers[0],signal.SIGKILL)"
+          test "$(docker wait demo)" = 1
+          docker cp demo:/data/runs/ci-controlled/supervisor.json controlled-evidence/worker-failure.json
+          python -c "import json; s=json.load(open('controlled-evidence/worker-failure.json')); assert s['status']=='failed' and s['process']=='worker',s"
+          docker stop clickhouse-ci
+      - uses: actions/upload-artifact@v4
+        with:
+          name: controlled-pipeline-evidence
+          path: controlled-evidence/
+      - name: Push verified image
+        run: docker push ghcr.io/nayeonshin/cyberdefense-hackathon:${{ github.sha }}

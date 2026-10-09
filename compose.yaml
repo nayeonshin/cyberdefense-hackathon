@@ -1,0 +1,16 @@
+services:
+  orchestrator:
+    build: .
+    platform: linux/amd64
+    ports:
+      - "127.0.0.1:8501:8501"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATA_DIR: /data
+    volumes:
+      - runtime:/data
+    stop_grace_period: 20s
+volumes:
+  runtime:

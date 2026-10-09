@@ -1,0 +1,50 @@
+version: "2.0"
+services:
+  orchestrator:
+    image: ghcr.io/nayeonshin/cyberdefense-hackathon:REPLACE_WITH_COMMIT_SHA
+    env:
+      - DATA_DIR=/data
+      - DATA_SOURCE=fixtures
+      - RUN_MODE=preview
+      - RUN_ID=development
+      - PORT=8501
+    expose:
+      - port: 8501
+        as: 80
+        proto: tcp
+        to:
+          - global: true
+        http_options:
+          read_timeout: 60000
+          send_timeout: 60000
+    params:
+      storage:
+        data:
+          mount: /data
+          readOnly: false
+profiles:
+  compute:
+    orchestrator:
+      resources:
+        cpu:
+          units: 2
+        memory:
+          size: 4Gi
+        storage:
+          - size: 5Gi
+          - name: data
+            size: 1Gi
+            attributes:
+              persistent: true
+              class: beta3
+  placement:
+    akash:
+      pricing:
+        orchestrator:
+          denom: uact
+          amount: 1000
+deployment:
+  orchestrator:
+    akash:
+      profile: orchestrator
+      count: 1

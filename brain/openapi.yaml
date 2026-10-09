@@ -1,0 +1,147 @@
+# OpenAPI 3.0 description of the scan service, for registering it as a Guild integration.
+# Hand-written because FastAPI emits OpenAPI 3.1 and Guild's parser expects 3.0.
+# Keep in step with brain/service.py.
+openapi: 3.0.3
+info:
+  title: Threat Brain
+  version: 1.0.0
+  description: Fetches a suspicious URL as text, scans what it serves with Semgrep rules and returns a verdict.
+paths:
+  /scan:
+    post:
+      operationId: scan_url
+      summary: Fetch a suspicious URL, scan what it serves with Semgrep, and return the verdict
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScanRequest'
+      responses:
+        '200':
+          description: The event with the verdict fields filled in
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanResult'
+  /scan/batch:
+    post:
+      operationId: scan_urls
+      summary: Scan up to 25 URLs in one call, such as the pages of one site, and return a verdict for each
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchRequest'
+      responses:
+        '200':
+          description: One result per event, in request order, plus counts by status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchResult'
+components:
+  schemas:
+    BatchRequest:
+      type: object
+      required: [events]
+      properties:
+        events:
+          type: array
+          minItems: 1
+          maxItems: 25
+          items:
+            $ref: '#/components/schemas/ScanRequest'
+    BatchSummary:
+      type: object
+      properties:
+        total:
+          type: integer
+        by_status:
+          type: object
+          description: Number of events per action_status
+          additionalProperties:
+            type: integer
+        highest_confidence:
+          type: object
+          properties:
+            event_id:
+              type: string
+            target_url:
+              type: string
+            confidence_score:
+              type: number
+    BatchResult:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScanResult'
+        summary:
+          $ref: '#/components/schemas/BatchSummary'
+    ScanRequest:
+      type: object
+      required: [event_id, target_url, timestamp]
+      properties:
+        event_id:
+          type: string
+          description: Event identifier from the ingestion layer, for example evt-10928
+        target_url:
+          type: string
+          description: The suspicious URL to fetch and scan
+        timestamp:
+          type: string
+          description: ISO 8601 time the event was ingested
+        listed_on_feed:
+          type: boolean
+          description: True when an independent threat feed also lists this URL; raises the confidence score
+    Finding:
+      type: object
+      properties:
+        rule:
+          type: string
+          description: Semgrep rule that matched
+        category:
+          type: string
+          description: Threat category, for example credential_harvester
+        weight:
+          type: number
+        file:
+          type: string
+          description: Captured file the match is in
+        line:
+          type: integer
+        end_line:
+          type: integer
+        snippet:
+          type: string
+          description: The matched source lines
+    ScanResult:
+      type: object
+      properties:
+        event_id:
+          type: string
+        target_url:
+          type: string
+        timestamp:
+          type: string
+        semgrep_detected:
+          type: boolean
+          description: True when at least one Semgrep rule matched
+        confidence_score:
+          type: number
+          description: 0 to 0.99
+        evidence:
+          type: string
+          description: Human-readable summary of the strongest finding
+        action_status:
+          type: string
+          enum: [VERIFIED, REJECTED, FETCH_FAILED]
+        proof_url:
+          type: string
+        findings:
+          type: array
+          items:
+            $ref: '#/components/schemas/Finding'

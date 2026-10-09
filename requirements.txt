@@ -1,0 +1,6 @@
+streamlit==1.65.0
+pandas==3.0.6
+clickhouse-connect==1.10.0
+requests==2.34.2
+PyYAML==6.0.3
+filelock==4.0.12

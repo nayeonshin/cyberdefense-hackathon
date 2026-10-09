@@ -1,0 +1,21 @@
+[theme]
+base = "light"
+primaryColor = "#e4f222"
+backgroundColor = "#f4f2f0"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#0c0a08"
+font = "Inter, sans-serif"
+baseFontWeight = 400
+
+[[theme.fontFaces]]
+family = "Inter"
+url = "app/static/fonts/Inter-Regular.woff2"
+weight = "400"
+style = "normal"
+
+[browser]
+gatherUsageStats = false
+
+[server]
+headless = true
+enableStaticServing = true
