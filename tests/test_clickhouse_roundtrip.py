@@ -180,3 +180,33 @@ def test_status_failure_recovers_without_rescanning_a_persisted_verdict(database
     assert len(calls[0]) == 3 and len(calls[1]) == 2
     assert calls[0][0] not in calls[1]
     assert threatfeed.get_pending_targets(5) == []
+
+
+def _event(event_id, score):
+    return {"event_id": event_id, "target_url": "http://127.0.0.1/x", "timestamp": "2026-10-09T18:00:00Z",
+            "semgrep_detected": True, "confidence_score": score, "evidence": "e",
+            "action_status": "VERIFIED", "proof_url": ""}
+
+
+def test_confidence_reads_back_exactly(database):
+    """A 0.95 verdict must still satisfy a ">= 0.95" threshold after a round trip."""
+    for score in (0.6, 0.75, 0.95, 0.99):
+        store.append_verdict(_event(f"evt-{score}", score), client=database)
+    rows = dict(database.query("SELECT event_id, confidence_score FROM events FINAL").result_rows)
+    assert rows == {"evt-0.6": 0.6, "evt-0.75": 0.75, "evt-0.95": 0.95, "evt-0.99": 0.99}
+
+
+def test_float32_table_is_widened_and_scores_restored(database):
+    database.command("DROP TABLE events")
+    database.command(store.EVENTS_DDL.format(table="events").replace("Nullable(Float64)", "Nullable(Float32)"))
+    database.insert("events", [["old", "http://127.0.0.1/x", datetime(2026, 10, 9, tzinfo=timezone.utc),
+                                True, 0.95, "e", "VERIFIED", ""]], column_names=list(store.EVENT_COLUMNS))
+    assert database.query("SELECT confidence_score FROM events").result_rows[0][0] != 0.95
+
+    store.migrate_events_schema(database)
+    store.migrate_events_schema(database)  # second call is a no-op
+
+    kind = database.query("SELECT type FROM system.columns WHERE database = currentDatabase() "
+                          "AND table = 'events' AND name = 'confidence_score'").result_rows[0][0]
+    assert kind == "Nullable(Float64)"
+    assert database.query("SELECT confidence_score FROM events").result_rows[0][0] == 0.95

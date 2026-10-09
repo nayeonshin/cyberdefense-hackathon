@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS {table} (
     target_url String,
     timestamp DateTime64(3, 'UTC'),
     semgrep_detected Nullable(Bool),
-    confidence_score Nullable(Float32),
+    confidence_score Nullable(Float64),
     evidence String DEFAULT '',
     action_status LowCardinality(String) DEFAULT 'PENDING',
     proof_url String DEFAULT '',
@@ -46,6 +46,25 @@ def events_table_name():
 
 def ensure_events_schema(client) -> None:
     client.command(EVENTS_DDL.format(table=events_table_name()))
+
+
+def migrate_events_schema(client) -> None:
+    """Widen a table created while confidence_score was Float32. Run once at worker start.
+
+    Float32 returns 0.95 as 0.94999999, which fails a ">= 0.95" threshold downstream.
+    Scores are written with two decimals, so rounding restores them exactly.
+    """
+    table = events_table_name()
+    column = client.query(
+        "SELECT type FROM system.columns WHERE database = currentDatabase() "
+        "AND table = {table:String} AND name = 'confidence_score'",
+        parameters={"table": table},
+    ).result_rows
+    if column and "Float32" in column[0][0]:
+        client.command(f"ALTER TABLE {table} MODIFY COLUMN confidence_score Nullable(Float64)",
+                       settings={"mutations_sync": 1})
+        client.command(f"ALTER TABLE {table} UPDATE confidence_score = round(confidence_score, 2) WHERE 1",
+                       settings={"mutations_sync": 1})
 
 
 @contextmanager

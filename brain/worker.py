@@ -15,7 +15,8 @@ import time
 
 from ingest import connect_clickhouse, ensure_schema, load_environment, table_name
 from threatfeed import update_takedown_status
-from .clickhouse import append_verdict, ensure_events_schema, events_table_name, get_pending_events, validate_verdict
+from .clickhouse import (append_verdict, ensure_events_schema, events_table_name, get_pending_events,
+                         migrate_events_schema, validate_verdict)
 
 from .pipeline import process_events, summarize
 
@@ -75,6 +76,7 @@ def main(argv=None) -> int:
     try:
         ensure_schema(client)
         ensure_events_schema(client)
+        migrate_events_schema(client)
         while True:
             try:
                 print(json.dumps(run_once(client, args.limit)), flush=True)
