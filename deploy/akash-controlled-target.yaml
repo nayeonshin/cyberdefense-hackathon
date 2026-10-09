@@ -12,7 +12,7 @@ services:
     command:
       - python
       - -c
-      - "import urllib.request as u; exec(u.urlopen('https://raw.githubusercontent.com/nayeonshin/cyberdefense-hackathon/f9769cb711977d5a38ea3648ac9099e0fae2df16/actor/mock_registrar_server.py').read())"
+      - "import urllib.request as u; exec(u.urlopen('https://raw.githubusercontent.com/nayeonshin/cyberdefense-hackathon/9cb856f3a4a547c6bca5505fb64ed11ab6b84be7/actor/mock_registrar_server.py').read())"
     expose:
       - port: 8099
         as: 80
@@ -29,13 +29,13 @@ profiles:
         storage:
           size: 1Gi
   placement:
-    dcloud:
+    akash:
       pricing:
         target:
-          denom: uakt
+          denom: uact
           amount: 10000
 deployment:
   target:
-    dcloud:
+    akash:
       profile: target
       count: 1

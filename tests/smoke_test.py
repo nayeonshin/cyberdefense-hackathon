@@ -18,17 +18,14 @@ import argparse
 import logging
 import os
 import sys
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
-os.chdir(REPO)  # so clickhouse.env is found regardless of where this is run from
-
-TEST_TABLE = "incoming_threats_test"
-TEST_RUNS_TABLE = "ingest_runs_test"
-os.environ["THREATS_TABLE"] = TEST_TABLE  # set before anything reads it
-os.environ["RUNS_TABLE"] = TEST_RUNS_TABLE  # never pollute the real ingest_runs
+TEST_TABLE = "incoming_threats_test_" + uuid.uuid4().hex
+TEST_RUNS_TABLE = "ingest_runs_test_" + uuid.uuid4().hex
 
 import ingest  # noqa: E402
 import threatfeed  # noqa: E402
@@ -319,7 +316,7 @@ def db_checks() -> None:
         client.close()
 
 
-def run() -> int:
+def _run() -> int:
     unit_checks()
     try:
         db_checks()
@@ -338,7 +335,31 @@ def run() -> int:
     return 0
 
 
+def run() -> int:
+    global passes
+    passes = 0
+    failures.clear()
+    previous = os.environ.get("THREATS_TABLE")
+    previous_runs = os.environ.get("RUNS_TABLE")
+    os.environ["THREATS_TABLE"] = TEST_TABLE
+    os.environ["RUNS_TABLE"] = TEST_RUNS_TABLE
+    try:
+        return _run()
+    finally:
+        if previous is None:
+            os.environ.pop("THREATS_TABLE", None)
+        else:
+            os.environ["THREATS_TABLE"] = previous
+        if previous_runs is None:
+            os.environ.pop("RUNS_TABLE", None)
+        else:
+            os.environ["RUNS_TABLE"] = previous_runs
+
+
 def test_smoke() -> None:  # pytest entrypoint
+    if os.getenv("RUN_CLICKHOUSE_TESTS") != "1":
+        import pytest
+        pytest.skip("set RUN_CLICKHOUSE_TESTS=1 to use a local ClickHouse test server")
     assert run() == 0, failures
 
 

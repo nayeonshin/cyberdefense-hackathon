@@ -2,6 +2,12 @@
 
 Live URLhaus threat feed → ClickHouse → `threatfeed.get_pending_targets()` for Member 2.
 
+The scanner integration is documented in [brain/README.md](brain/README.md).
+After ingestion, run `python -m brain.worker --once` to batch-scan pending URL
+events and persist verdicts. `python -m brain.telemetry --output graph-data.json`
+exports domain activity, threat-type counts and current scanner verdict counts.
+The integration tests use isolated tables/databases and owned demo targets.
+
 | File | Purpose |
 |---|---|
 | `ingest.py` | Polls URLhaus `/v1/urls/recent/`, maps records, dedups on `event_id`, inserts into `incoming_threats` |
