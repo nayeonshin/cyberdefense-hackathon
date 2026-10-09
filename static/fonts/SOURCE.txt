@@ -1,0 +1,1 @@
+Inter Regular from https://github.com/rsms/inter at commit 353b61b9f4430d5f420d56605a6e7993e0941470. Licensed under SIL OFL 1.1; see OFL.txt.

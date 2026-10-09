@@ -9,7 +9,7 @@ from pathlib import Path
 from . import config
 from .contract import DONE_STATUSES, Receipt
 
-DDL = """
+DDL_TEMPLATE = """
 CREATE TABLE IF NOT EXISTS {table} (
     event_id String,
     target_url String,
@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS {table} (
     created_at DateTime64(3, 'UTC')
 ) ENGINE = MergeTree ORDER BY (created_at, event_id)
 """
+
+DDL = DDL_TEMPLATE.format(table="actions")     # the dashboard worker creates the table with this
 
 COLUMNS = ["event_id", "target_url", "domain", "action", "rung", "recipient", "status",
            "proof_url", "evidence_sha256", "dry_run", "latency_ms", "detail", "created_at"]
@@ -74,7 +76,7 @@ class Ledger:
         if self._client is None:
             self._client = clickhouse_client()
         if self._client is not None and not self._table_ready:
-            self._client.command(DDL.format(table=actions_table()))
+            self._client.command(DDL_TEMPLATE.format(table=actions_table()))
             self._table_ready = True
         return self._client
 

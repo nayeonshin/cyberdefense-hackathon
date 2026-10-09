@@ -1,4 +1,5 @@
 .env
+clickhouse.env
 __pycache__/
 *.pyc
 .venv/
@@ -6,6 +7,15 @@ outbox/
 ledger/
 state.json
 STOP
+.runtime/
+.pytest_cache/
+deploy.private.yaml
+.env.*
+!.env.example
+work/
+outputs/
+*.mp4
+*.webm
 actor/bench/latest.json
 # --- Secrets ---------------------------------------------------------------
 # clickhouse.env holds the ClickHouse password; .roo/mcp.json duplicates it.
@@ -14,7 +24,6 @@ actor/bench/latest.json
 !*.env.example
 .roo/
 mcp.json
-
 # --- Python ----------------------------------------------------------------
 *.py[cod]
 *$py.class
@@ -22,14 +31,11 @@ venv/
 env/
 .Python
 build/
-.pytest_cache/
 captures/
-clickhouse.env
 node_modules/
 dist/
 *.egg-info/
 .eggs/
-
 # --- Tooling / editors -----------------------------------------------------
 .mypy_cache/
 .ruff_cache/
@@ -38,7 +44,6 @@ htmlcov/
 .DS_Store
 .idea/
 .vscode/
-
 # --- Runtime artifacts -----------------------------------------------------
 *.log
 logs/
