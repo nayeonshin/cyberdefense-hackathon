@@ -17,11 +17,12 @@ from shipper.presentation import (
 )
 from shipper.settings import Settings
 from shipper.runtime_status import read_runtime_status
+from shipper.motion import render_motion
+from shipper.motion_model import motion_state
 
 st.set_page_config(page_title="Takedown Orchestrator", page_icon="🛡️", layout="wide")
 st.html("<style>" + (Path(__file__).parent / "shipper/dashboard.css").read_text(encoding="utf-8") + "</style>")
 settings = Settings.from_env()
-st.caption("CYBERDEFENSE / OBSERVE → VERIFY → ACT")
 st.title("Takedown Orchestrator")
 if settings.source == "fixtures":
     st.warning("Simulated data — supplied examples only. No live scans or dispatched reports.", icon="🧪")
@@ -136,10 +137,12 @@ def live_panels():
         error = type(exc).__name__
     snapshot = st.session_state.get("snapshot")
     statuses = []
+    runtime_error = False
     for name in ("heartbeat.json", "supervisor.json", "pipeline.json", "target-check.json"):
         value, status_error = read_runtime_status(settings.run_dir / name)
         statuses.append(value)
         if status_error:
+            runtime_error = True
             st.error(status_error)
     heartbeat, supervisor, pipeline, check = statuses
     updated = parse_time(heartbeat.get("updated_at"))
@@ -161,14 +164,16 @@ def live_panels():
         st.error(f"Data source unavailable ({error}). Showing the last successful snapshot, if any. No fixture fallback.")
     if snapshot is None:
         st.info("Waiting for data. Check the data source and team pipeline configuration.")
+        render_motion(motion_state(None, [], simulated=settings.source == "fixtures", degraded=True))
         render_run_details(snapshot, error, pipeline)
         return
     elapsed = (datetime.now(timezone.utc) - snapshot["fetched_at"]).total_seconds()
     worker_label = "unavailable / stale" if stale_worker else f"{status} · heartbeat {age:.0f}s ago"
     st.caption(f"Worker {worker_label} · Last successful refresh {snapshot['fetched_at']:%H:%M:%S} UTC · {elapsed:.0f}s ago")
-    st.html(metrics_html(snapshot["metrics"]))
-    st.caption("Throughput uses ingestion time. Submitted actions count SENT receipts only; saved test messages are excluded.")
     records, receipts = snapshot["events"], snapshot["receipts"]
+    degraded = bool(error or runtime_error or elapsed > 8 or supervisor.get("status") == "failed"
+                    or pipeline.get("status") == "degraded"
+                    or (settings.source != "fixtures" and (stale_worker or status != "running")))
     ids = [r["event"]["event_id"] for r in records]
     selected, disappeared = resolve_selection(ids, st.session_state.get("selected_event"), st.query_params.get("event"))
     st.session_state["selected_event"] = selected
@@ -177,6 +182,8 @@ def live_panels():
                 "The selected event is no longer available. The queue is empty.")
     if not records:
         st.info("No events in this run yet. Waiting for ingestion.")
+        render_motion(motion_state(None, [], simulated=settings.source == "fixtures", degraded=degraded))
+        st.html(metrics_html(snapshot["metrics"]))
         render_run_details(snapshot, error, pipeline)
         return
 
@@ -185,6 +192,12 @@ def live_panels():
     st.session_state["queue_event_ids"] = ids
     st.session_state["threat_queue"] = {"selection": {"rows": [ids.index(selected)], "columns": [], "cells": []}}
     fresh = check.get("http_status") == 410 and current_confirmation(check, heartbeat, os.getenv("SHIPPER_STARTED_AT"))
+    selected_record = next(r for r in records if r["event"]["event_id"] == selected)
+    historical = settings.mode == "controlled" and not (fresh and selected_record["event"]["target_url"] == settings.controlled_url)
+    render_motion(motion_state(selected_record, receipts, simulated=settings.source == "fixtures",
+                               historical=historical, degraded=degraded))
+    st.html(metrics_html(snapshot["metrics"]))
+    st.caption("Throughput uses ingestion time. Submitted actions count SENT receipts only; saved test messages are excluded.")
     rows = []
     for record in records:
         event, metadata = record["event"], record["metadata"]
@@ -211,7 +224,7 @@ def live_panels():
                          column_config={"Event": st.column_config.TextColumn(width="medium"),
                                         "Target": st.column_config.TextColumn(width="large")})
         with detail, st.container(key="event_details"):
-            render_details(next(r for r in records if r["event"]["event_id"] == selected), receipts, heartbeat, check)
+            render_details(selected_record, receipts, heartbeat, check)
     render_run_details(snapshot, error, pipeline)
 
 
