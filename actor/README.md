@@ -1,11 +1,19 @@
 # Actor: autonomous action and dispatch (Member 3)
 
-![Actor bench scorecard](bench/scorecard.svg)
+![Actor bench drawing sheet: verdict stamp, scenario matrix, acceptance table and revision history](bench/scorecard.svg)
 
-The card above is rewritten by `python -m actor.bench`: 99 labelled scenarios run through the
-real dispatcher with every outside channel replaced by a recorder. One safety violation makes
-a run UNSAFE whatever its score. Details are in [bench/scenarios.yaml](bench/scenarios.yaml)
-and `bench/scorecard.html`.
+The sheet is redrawn by `python -m actor.bench`. It runs 101 labelled scenarios through the
+real dispatcher with every outside channel replaced by a recorder.
+
+- **View A** shows every scenario against every action: a filled square was sent as required,
+  a blank was held back as required, anything red is a nonconformance.
+- **Acceptance** shows how the score is made up. One safety violation makes a run UNSAFE
+  whatever the score.
+- **Revisions** is the history of runs, and the stamp is the verdict of the latest one.
+
+Scenarios are in [bench/scenarios.yaml](bench/scenarios.yaml); `bench/scorecard.html` adds the
+list of nonconformances. The lettering is a subset of Routed Gothic (SIL Open Font License,
+see [bench/assets](bench/assets/LETTERING-LICENSE.txt)).
 
 Takes a verified verdict and acts on it, one rung at a time. Every action writes a receipt.
 

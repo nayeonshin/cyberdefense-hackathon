@@ -1,316 +1,452 @@
-"""Draw the bench result: scorecard.svg for the README and scorecard.html for a closer look."""
+"""Draw the bench result as an engineering drawing sheet.
+
+scorecard.svg goes into the README, scorecard.html adds the nonconformance list.
+The verdict is the release stamp, the run history is the revision table, the score
+is one field of the title block and its make-up is the acceptance table.
+"""
+import base64
 from html import escape
 from pathlib import Path
 
 HERE = Path(__file__).parent
-W, PAD = 920, 24
+W = 880
+EDGE, FRAME = 8, 22            # trim line and drawing frame, as on an ISO 5457 sheet
+LEFT, RIGHT = 36, W - 36       # inner margins of the drawing area
 
 ACTIONS = ["feed", "urlscan", "netcraft", "abuseipdb", "notify_host", "notify_registrar",
            "mock_registrar", "confirm"]
-GROUPS = [("act", "should act"), ("withhold", "must not act"),
-          ("hostile", "hostile input"), ("lifecycle", "lifecycle"),
-          ("pipeline", "team pipeline")]
+GROUPS = [("act", "ACT"), ("withhold", "WITHHOLD"), ("hostile", "HOSTILE INPUT"),
+          ("lifecycle", "LIFECYCLE"), ("pipeline", "PIPELINE")]
+PARTS = [("decisions", "RIGHT DECISIONS", 40), ("robustness", "SURVIVES BAD INPUT", 20),
+         ("receipts", "RECEIPTS VERIFY", 20), ("lifecycle", "LIFECYCLE", 10),
+         ("mutants", "SABOTAGE CAUGHT", 10)]
 
-STYLE = """
-.card{--surface:#fcfcfb;--tile:#f1f0ea;--ink:#0b0b0b;--ink2:#52514e;--muted:#898781;
---grid:#e1e0d9;--good:#0ca30c;--warn:#fab219;--serious:#ec835a;--crit:#d03b3b}
-@media (prefers-color-scheme: dark){.card{--surface:#1a1a19;--tile:#252523;--ink:#ffffff;
---ink2:#c3c2b7;--grid:#2c2c2a}}
-.card text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;fill:var(--ink)}
-.bg{fill:var(--surface)}.tile{fill:var(--tile)}.t2{fill:var(--ink2)!important}
-.tm{fill:var(--muted)!important}.good{fill:var(--good)}.ser{fill:var(--serious)}
-.crit{fill:var(--crit)}.dot{fill:var(--grid)}.neutral{fill:var(--muted)}
-.l-grid{stroke:var(--grid);stroke-width:1;fill:none}
-.l-line{stroke:var(--ink2);stroke-width:2;fill:none;stroke-linejoin:round;stroke-linecap:round}
-.l-ser{stroke:var(--serious);stroke-width:2;fill:none}
-.l-crit{stroke:var(--crit);stroke-width:2;fill:none;stroke-linecap:round}
-.l-white{stroke:#ffffff;stroke-width:3;fill:none;stroke-linecap:round;stroke-linejoin:round}
-.ring{stroke:var(--surface);stroke-width:2}
+PAPER, INK, SOFT, RULE = "#f2f4f1", "#16222e", "#4a5a68", "#b4bec4"
+REDLINE, STAMP = "#c4281c", "#2536a8"
+
+
+def _font_face() -> str:
+    data = base64.b64encode((HERE / "assets" / "lettering.ttf").read_bytes()).decode("ascii")
+    return ("@font-face{font-family:'Sheet';src:url(data:font/ttf;base64," + data
+            + ") format('truetype')}")
+
+
+def _style() -> str:
+    return _font_face() + f"""
+.sheet text{{font-family:'Sheet','Bahnschrift','DIN Alternate','Arial Narrow',sans-serif;fill:{INK}}}
+.soft{{fill:{SOFT}!important}}.red{{fill:{REDLINE}!important}}.blue{{fill:{STAMP}!important}}
+.l{{stroke:{INK};fill:none;stroke-width:.7}}.h{{stroke:{RULE};fill:none;stroke-width:.5}}
+.f{{stroke:{INK};fill:none;stroke-width:1.6}}.t{{stroke:{INK};fill:none;stroke-width:1.1}}
+.r{{stroke:{REDLINE};fill:none;stroke-width:1.2;stroke-linecap:round}}
+.ink{{fill:{INK}}}.redfill{{fill:{REDLINE}}}
 """
 
-VERDICTS = {   # word -> (status class, white symbol drawn inside a 44px square)
-    "IMPROVED": ("good", "M12 28 L22 16 L32 28"),
-    "SAME": ("neutral", "M13 18 H31 M13 26 H31"),
-    "BASELINE": ("neutral", "M14 22 H30"),
-    "REGRESSED": ("ser", "M12 16 L22 28 L32 16"),
-    "UNSAFE": ("crit", "M14 14 L30 30 M30 14 L14 30"),
-}
+
+def _t(x, y, content, size=10, cls="", anchor="start", spacing=0.4) -> str:
+    return (f'<text x="{x:.1f}" y="{y:.1f}" font-size="{size}" text-anchor="{anchor}" '
+            f'letter-spacing="{spacing}" class="{cls}">{escape(str(content))}</text>')
 
 
-def _text(x, y, content, size=12, cls="", anchor="start", weight="400") -> str:
-    return (f'<text x="{x:.1f}" y="{y:.1f}" font-size="{size}" font-weight="{weight}" '
-            f'text-anchor="{anchor}" class="{cls}">{escape(str(content))}</text>')
+def _line(x1, y1, x2, y2, cls="l") -> str:
+    return f'<path d="M{x1:.1f} {y1:.1f}L{x2:.1f} {y2:.1f}" class="{cls}"/>'
 
 
-def _pct(value: float) -> str:
-    return f"{value * 100:.0f}%"
+def _clip(text: str, limit: int) -> str:
+    """Cut at a word boundary so a note never ends mid-word."""
+    return text if len(text) <= limit else text[:limit].rsplit(" ", 1)[0] + " ..."
 
 
-def _headline(result: dict) -> str:
-    if result["violations"]:
-        n = result["violations"]
-        return f"{n} safety violation{'s' if n != 1 else ''}: not safe to run live"
-    if result["delta"] is None:
-        return "First measurement"
-    if result["verdict"] == "SAME":
-        return "No change since the last run"
-    return f"Score went from {result['previous_score']} to {result['score']}"
+def _rev(index: int) -> str:
+    """Revision letters as on a drawing: A, B ... Z, AA."""
+    out = ""
+    index += 1
+    while index:
+        index, rem = divmod(index - 1, 26)
+        out = chr(65 + rem) + out
+    return out
 
 
-def _spark(x, y, w, h, values) -> str:
-    if len(values) < 2:
-        return ""
-    lo, hi = min(values), max(values)
-    span = (hi - lo) or 1
-    step = w / (len(values) - 1)
-    points = [(x + i * step, y + h - (v - lo) / span * h) for i, v in enumerate(values)]
-    path = " ".join(f"{'M' if i == 0 else 'L'}{px:.1f} {py:.1f}" for i, (px, py) in enumerate(points))
-    lx, ly = points[-1]
-    return f'<path d="{path}" class="l-line"/><circle cx="{lx:.1f}" cy="{ly:.1f}" r="3" class="t2 ring"/>'
-
-
-def _tile(x, y, w, label, value, change, good_change, series) -> str:
-    """change: numeric delta or None; good_change: whether that direction is an improvement."""
-    out = [f'<rect x="{x:.1f}" y="{y}" width="{w:.1f}" height="86" rx="8" class="tile"/>',
-           _text(x + 12, y + 22, label, 12, "t2"),
-           _text(x + 12, y + 52, value, 23, weight="700")]
-    if change is None:
-        out.append(_text(x + 12, y + 72, "first run", 11, "tm"))
-    elif change == 0:
-        out.append(_text(x + 12, y + 72, "no change", 11, "tm"))
-    else:
-        cls = "good" if good_change else "ser"
-        tri = (f"M{x + 12:.1f} {y + 71} l5 -8 l5 8 z" if change > 0
-               else f"M{x + 12:.1f} {y + 63} l5 8 l5 -8 z")
-        out.append(f'<path d="{tri}" class="{cls}"/>')
-        out.append(_text(x + 26, y + 72, f"{change:+g}", 11, "t2"))
-    out.append(_spark(x + w - 58, y + 62, 46, 14, series))
+def _frame(height: int) -> str:
+    out = [f'<rect width="{W}" height="{height}" fill="{PAPER}"/>',
+           f'<rect x="{EDGE}" y="{EDGE}" width="{W - 2 * EDGE}" height="{height - 2 * EDGE}" class="h"/>',
+           f'<rect x="{FRAME}" y="{FRAME}" width="{W - 2 * FRAME}" height="{height - 2 * FRAME}" class="f"/>']
+    cols, rows = 8, 4
+    for i in range(cols):
+        x0 = FRAME + (W - 2 * FRAME) * i / cols
+        mid = x0 + (W - 2 * FRAME) / cols / 2
+        if i:
+            out += [_line(x0, EDGE, x0, FRAME, "h"), _line(x0, height - FRAME, x0, height - EDGE, "h")]
+        out += [_t(mid, FRAME - 4, i + 1, 8, "soft", "middle"),
+                _t(mid, height - EDGE - 4, i + 1, 8, "soft", "middle")]
+    for j in range(rows):
+        y0 = FRAME + (height - 2 * FRAME) * j / rows
+        mid = y0 + (height - 2 * FRAME) / rows / 2 + 3
+        if j:
+            out += [_line(EDGE, y0, FRAME, y0, "h"), _line(W - FRAME, y0, W - EDGE, y0, "h")]
+        out += [_t((EDGE + FRAME) / 2, mid, "ABCD"[j], 8, "soft", "middle"),
+                _t(W - (EDGE + FRAME) / 2, mid, "ABCD"[j], 8, "soft", "middle")]
     return "".join(out)
 
 
-def _matrix(result: dict, top: int) -> tuple:
+def _mark(x, y, size, state) -> str:
+    """Filled square: sent as required. Blank: held back. Hollow red: missing. Red cross: forbidden."""
+    pad = 0.9
+    if state == "acted":
+        return (f'<rect x="{x + pad:.1f}" y="{y + pad:.1f}" width="{size - 2 * pad:.1f}" '
+                f'height="{size - 2 * pad:.1f}" class="ink"/>')
+    if state == "missed":
+        return (f'<rect x="{x + 1:.1f}" y="{y + 1:.1f}" width="{size - 2:.1f}" '
+                f'height="{size - 2:.1f}" class="r"/>')
+    if state == "forbidden":
+        return (f'<path d="M{x:.1f} {y:.1f}l{size:.1f} {size:.1f}M{x + size:.1f} {y:.1f}'
+                f'l{-size:.1f} {size:.1f}" class="r"/>')
+    return ""
+
+
+def _arrow(x, y, direction) -> str:
+    return f'<path d="M{x:.1f} {y:.1f}l{5 * direction} -1.7v3.4z" class="ink"/>'
+
+
+def _view(result: dict, top: int) -> tuple:
     scenarios = []
-    for key, _label in GROUPS:
+    for key, _ in GROUPS:
         scenarios += [s for s in result["scenarios"] if s["group"] == key]
-    label_w, gap = 122, 12
-    avail = W - 2 * PAD - label_w - gap * (len(GROUPS) - 1)
-    pitch = min(13.0, avail / max(1, len(scenarios)))
-    cell = pitch - 2
-    row_h = 14
-    out = [_text(PAD, top, "Every scenario against every action", 13, weight="700")]
+    x0, gap, row_h = LEFT + 112, 9, 12
+    present = [g for g in GROUPS if any(s["group"] == g[0] for s in scenarios)]
+    pitch = (RIGHT - x0 - gap * (len(present) - 1)) / max(1, len(scenarios))
+    cell = min(pitch, row_h) - 0.6
+    grid_top, grid_bottom = top + 44, top + 44 + row_h * len(ACTIONS)
 
-    # legend
-    lx, ly = W - PAD - 520, top - 9
-    legend = [("acted", "sent, as required"), ("withheld", "held back, as required"),
-              ("missed", "should have sent"), ("forbidden", "must not have sent")]
-    for state, words in legend:
-        out.append(_cell(lx, ly, 9, state))
-        out.append(_text(lx + 14, top, words, 11, "t2"))
-        lx += 26 + len(words) * 5.9
-    top += 22
+    out = [_t(LEFT, top + 4, "VIEW A", 13, spacing=1),
+           _line(LEFT, top + 8, LEFT + 46, top + 8, "t"),
+           _t(LEFT + 58, top + 4, f"{len(scenarios)} SCENARIOS × {len(ACTIONS)} ACTIONS, "
+              "EVERY CHANNEL RECORDED", 10, "soft")]
 
-    x = PAD + label_w
-    columns = {}
-    for key, label in GROUPS:
-        members = [s for s in scenarios if s["group"] == key]
-        passed = sum(s["status"] == "pass" for s in members)
-        out.append(_text(x, top, f"{label} {passed}/{len(members)}", 11, "t2"))
-        for s in members:
-            columns[s["id"]] = x
-            x += pitch
-        x += gap
-    grid_top = top + 8
+    # key to the marks, right-aligned on the view line
+    kx = RIGHT - 408
+    for state, words in (("acted", "SENT AS REQUIRED"), ("withheld", "BLANK: HELD BACK"),
+                         ("missed", "MISSING"), ("forbidden", "FORBIDDEN")):
+        if state != "withheld":
+            out.append(_mark(kx, top - 4, 8, state))
+            kx += 12
+        out.append(_t(kx, top + 4, words, 10, "soft"))
+        kx += len(words) * 6.1 + 14
+
     for row, action in enumerate(ACTIONS):
         y = grid_top + row * row_h
-        out.append(_text(PAD + label_w - 10, y + cell * 0.5 + 4, action, 11, "t2", "end"))
-        for s in scenarios:
-            state = s["cells"].get(action, "withheld")
-            tip = (f"{s['id']} / {action}: expected {s['expected'].get(action, 0)}, "
-                   f"sent {s['executed'].get(action, 0)}")
-            out.append(f"<g><title>{escape(tip)}</title>{_cell(columns[s['id']], y, cell, state)}</g>")
-    bottom = grid_top + len(ACTIONS) * row_h
-    for s in scenarios:
-        if s["crashed"]:
-            out.append(f'<rect x="{columns[s["id"]]:.1f}" y="{bottom + 1}" width="{cell:.1f}" '
-                       f'height="4" class="ser"><title>{escape(s["id"])} crashed</title></rect>')
-    if any(s["crashed"] for s in scenarios):
-        out.append(f'<rect x="{PAD}" y="{bottom + 1}" width="9" height="4" class="ser"/>')
-        out.append(_text(PAD + 14, bottom + 7, "bar under a column: the Actor crashed", 11, "t2"))
-    return "".join(out), bottom + 16
+        out.append(_t(x0 - 8, y + row_h - 3, action.replace("_", " ").upper(), 10, "soft", "end"))
+
+    x, columns, flagged = x0, {}, []
+    for key, label in present:
+        members = [s for s in scenarios if s["group"] == key]
+        width = pitch * len(members)
+        passed = sum(s["status"] == "pass" for s in members)
+        cls = "" if passed == len(members) else "red"
+        # dimension line with extension lines, the way a drawing states a length
+        out += [_line(x, grid_top - 22, x, grid_top - 2), _line(x + width, grid_top - 22, x + width, grid_top - 2),
+                _line(x, grid_top - 16, x + width, grid_top - 16),
+                _arrow(x, grid_top - 16, 1), _arrow(x + width, grid_top - 16, -1),
+                _t(x + width / 2, grid_top - 20, f"{label} {passed}/{len(members)}", 10, cls, "middle")]
+        out.append(f'<rect x="{x:.1f}" y="{grid_top}" width="{width:.1f}" height="{row_h * len(ACTIONS)}" class="t"/>')
+        for row in range(1, len(ACTIONS)):
+            out.append(_line(x, grid_top + row * row_h, x + width, grid_top + row * row_h, "h"))
+        for s in members:
+            columns[s["id"]] = x
+            for row, action in enumerate(ACTIONS):
+                state = s["cells"].get(action, "withheld")
+                tip = (f"{s['id']} / {action}: required {s['expected'].get(action, 0)}, "
+                       f"sent {s['executed'].get(action, 0)}")
+                mark = _mark(x + (pitch - cell) / 2, grid_top + row * row_h + (row_h - cell) / 2, cell, state)
+                hit = (f'<rect x="{x:.1f}" y="{grid_top + row * row_h}" width="{pitch:.1f}" '
+                       f'height="{row_h}" fill="none" pointer-events="all"/>')
+                out.append(f"<g><title>{escape(tip)}</title>{hit}{mark}</g>")
+            if s["status"] != "pass":
+                flagged.append(s)
+            x += pitch
+        x += gap
+
+    # redline every failing column and tie the first few to numbered notes
+    notes = flagged[:5]
+    for s in flagged:
+        out.append(f'<rect x="{columns[s["id"]] - 0.5:.1f}" y="{grid_top - 2}" width="{pitch + 1:.1f}" '
+                   f'height="{row_h * len(ACTIONS) + 4}" rx="1.5" class="r"/>')
+    for n, s in enumerate(notes, start=1):
+        cx = columns[s["id"]] + pitch / 2
+        bx = min(max(x0 + 14 + (n - 1) * 22, cx - 60), cx + 60)
+        out += [_line(cx, grid_bottom + 2, bx, grid_bottom + 13, "r"),
+                f'<circle cx="{bx:.1f}" cy="{grid_bottom + 20}" r="7" class="r"/>',
+                _t(bx, grid_bottom + 23.5, n, 9, "red", "middle", 0)]
+    return "".join(out), grid_bottom + (34 if notes else 14), notes, len(flagged)
 
 
-def _cell(x, y, size, state) -> str:
-    if state == "acted":
-        return f'<rect x="{x:.1f}" y="{y:.1f}" width="{size:.1f}" height="{size:.1f}" rx="1.5" class="good"/>'
-    if state == "missed":
-        return (f'<rect x="{x + 1:.1f}" y="{y + 1:.1f}" width="{size - 2:.1f}" height="{size - 2:.1f}" '
-                f'rx="1" class="l-ser"/>')
-    if state == "forbidden":
-        return (f'<path d="M{x:.1f} {y:.1f} l{size:.1f} {size:.1f} M{x + size:.1f} {y:.1f} '
-                f'l{-size:.1f} {size:.1f}" class="l-crit"/>')
-    half = size / 2
-    return f'<circle cx="{x + half:.1f}" cy="{y + half:.1f}" r="1.3" class="dot"/>'
+def _table(x, y, widths, header, rows, row_h=17, aligns=None) -> tuple:
+    """A ruled table. rows hold (text, css class) cells. Returns (svg, bottom y)."""
+    total = sum(widths)
+    aligns = aligns or ["start"] * len(widths)
+    height = row_h * (len(rows) + 1)
+    out = [f'<rect x="{x}" y="{y}" width="{total}" height="{height}" class="t"/>',
+           _line(x, y + row_h, x + total, y + row_h, "l")]
+    cx = x
+    for i, width in enumerate(widths):
+        if i:
+            out.append(_line(cx, y, cx, y + height, "h"))
+        tx = cx + 6 if aligns[i] == "start" else cx + width - 6
+        out.append(_t(tx, y + row_h - 5, header[i], 9, "soft", aligns[i], 0.6))
+        for r, row in enumerate(rows):
+            text, cls = row[i] if isinstance(row[i], tuple) else (row[i], "")
+            out.append(_t(tx, y + row_h * (r + 2) - 5, text, 10, cls, aligns[i]))
+        cx += width
+    for r in range(1, len(rows)):
+        out.append(_line(x, y + row_h * (r + 1), x + total, y + row_h * (r + 1), "h"))
+    return "".join(out), y + height
 
 
-def _history(history: list, top: int) -> tuple:
-    runs = history[-40:]
-    out = [_text(PAD, top, "Score per run", 13, weight="700")]
-    out.append(f'<circle cx="{W - PAD - 190}" cy="{top - 4}" r="4" class="good"/>')
-    out.append(_text(W - PAD - 181, top, "safe run", 11, "t2"))
-    out.append(f'<path d="M{W - PAD - 110} {top - 8} l8 8 m0 -8 l-8 8" class="l-crit"/>')
-    out.append(_text(W - PAD - 96, top, "run with violations", 11, "t2"))
-    x0, x1, y0, h = PAD + 34, W - PAD - 30, top + 14, 78
-    for value in (0, 50, 100):
-        y = y0 + h - value / 100 * h
-        out.append(f'<path d="M{x0} {y:.1f} H{x1}" class="l-grid"/>')
-        out.append(_text(x0 - 8, y + 4, value, 11, "tm", "end"))
-    step = (x1 - x0) / max(1, len(runs) - 1) if len(runs) > 1 else 0
-    points = [(x0 + i * step, y0 + h - r["score"] / 100 * h) for i, r in enumerate(runs)]
-    if len(points) > 1:
-        path = " ".join(f"{'M' if i == 0 else 'L'}{x:.1f} {y:.1f}" for i, (x, y) in enumerate(points))
-        out.append(f'<path d="{path}" class="l-line"/>')
-    for (x, y), run in zip(points, runs):
-        tip = f"{run['commit']}: score {run['score']}, {run['violations']} violations"
-        if run["violations"]:
-            mark = (f'<circle cx="{x:.1f}" cy="{y:.1f}" r="7" class="bg"/>'
-                    f'<path d="M{x - 4:.1f} {y - 4:.1f} l8 8 m0 -8 l-8 8" class="l-crit"/>')
-        else:
-            mark = f'<circle cx="{x:.1f}" cy="{y:.1f}" r="4" class="good ring"/>'
-        out.append(f"<g><title>{escape(tip)}</title>{mark}</g>")
-    if points:
-        x, y = points[-1]
-        out.append(_text(x + 10, y + 4, runs[-1]["score"], 12, weight="700"))
-    return "".join(out), y0 + h + 22
+def _acceptance(result: dict, x: int, y: int) -> tuple:
+    parts, mutants = result["parts"], result["mutants"]
+    rows = []
+    for i, (key, label, weight) in enumerate(PARTS, start=1):
+        value = parts[key]
+        measured = f"{mutants['caught']}/{mutants['total']}" if key == "mutants" else f"{value * 100:.0f}%"
+        cls = "" if value >= 0.9995 else "red"
+        rows.append((str(i), label, str(weight), (measured, cls), (f"{weight * value:.1f}", cls)))
+    rows.append(("", "SCORE", "100", "", (f"{result['score']:.1f}", "")))
+    out = [_t(x, y - 6, "ACCEPTANCE", 11, spacing=1)]
+    table, bottom = _table(x, y, [30, 156, 56, 72, 62], ["ITEM", "CHARACTERISTIC", "WEIGHT", "MEASURED", "POINTS"],
+                           rows, aligns=["start", "start", "end", "end", "end"])
+    out.append(table)
+    width = 376
+    out.append(_line(x, bottom - 17, x + width, bottom - 17, "t"))
+    violations = result["violations"]
+    gate = "MUST BE 0: NOT RELEASABLE" if violations else "MUST BE 0"
+    out += [f'<rect x="{x}" y="{bottom + 6}" width="{width}" height="34" class="t"/>',
+            _line(x, bottom + 23, x + width, bottom + 23, "h"),
+            _t(x + 6, bottom + 18, "SAFETY VIOLATIONS", 10),
+            _t(x + width - 6, bottom + 18, f"{violations}   {gate}", 10, "red" if violations else "", "end"),
+            _t(x + 6, bottom + 35, "SPEED PER VERDICT, NOT SCORED", 10, "soft"),
+            _t(x + width - 6, bottom + 35, f"{result['speed_ms']} ms", 10, "soft", "end")]
+    return "".join(out), bottom + 40
+
+
+def _notes(x: int, y: int, flagged: list, total_failing: int) -> tuple:
+    lines = [("1. EVERY OUTSIDE CHANNEL IS REPLACED BY A RECORDER.", "soft"),
+             ("2. ONE SAFETY VIOLATION MAKES THE RUN UNSAFE, WHATEVER THE SCORE.", "soft"),
+             ("3. SCENARIOS ARE ONLY ADDED, NEVER REMOVED.", "soft")]
+    out = [_t(x, y, "NOTES", 11, spacing=1)]
+    for i, (text, cls) in enumerate(lines):
+        out.append(_t(x, y + 16 + i * 14, text, 10, cls))
+    y += 16 + len(lines) * 14 + 4
+    for n, s in enumerate(flagged, start=1):
+        problem = (s["problems"][0] if s["problems"] else s["status"]).upper()
+        out += [f'<circle cx="{x + 6}" cy="{y - 3.5}" r="6" class="r"/>',
+                _t(x + 6, y, n, 8, "red", "middle", 0),
+                _t(x + 18, y, _clip(f"{s['id'].upper()}: {problem}", 58), 10, "red")]
+        y += 15
+    if total_failing > len(flagged):
+        out.append(_t(x + 18, y, f"AND {total_failing - len(flagged)} MORE, SEE SHEET 2", 10, "red"))
+        y += 14
+    return "".join(out), y
+
+
+def _revisions(history: list, x: int, y: int) -> tuple:
+    runs = list(enumerate(history))[-6:][::-1]
+    rows = []
+    for index, run in runs:
+        cls = "" if index == len(history) - 1 else "soft"
+        rows.append(((_rev(index), cls), (run["ts"][11:16], cls), (run["commit"], cls),
+                     (str(run["scenario_count"]), cls),
+                     (str(run["violations"]), "red" if run["violations"] else cls),
+                     (f"{run['score']:.1f}", cls), (run["verdict"], "red" if run["violations"] else cls)))
+    out = [_t(x, y - 6, "REVISIONS", 11, spacing=1)]
+    table, bottom = _table(x, y, [34, 46, 78, 46, 42, 50, 88],
+                           ["REV", "UTC", "COMMIT", "SCEN.", "VIOL.", "SCORE", "STATE"], rows,
+                           aligns=["start", "start", "start", "end", "end", "end", "start"])
+    return "".join(out) + table, bottom
+
+
+def _title_block(result: dict, history: list, x: int, y: int) -> str:
+    width, h1, h2 = 384, 50, 30
+    out = [f'<rect x="{x}" y="{y}" width="{width}" height="{h1 + 2 * h2}" class="f"/>',
+           _line(x, y + h1, x + width, y + h1, "l"), _line(x, y + h1 + h2, x + width, y + h1 + h2, "l"),
+           _line(x + 262, y, x + 262, y + h1, "l"),
+           _t(x + 6, y + 11, "TITLE", 8, "soft", spacing=0.8),
+           _t(x + 6, y + 31, "ACTOR BENCH", 19, spacing=1.2),
+           _t(x + 6, y + 44, "ACTION LADDER UNDER TEST", 10, "soft"),
+           _t(x + 268, y + 11, "SCORE", 8, "soft", spacing=0.8),
+           _t(x + width - 34, y + 40, f"{result['score']:.1f}", 30, anchor="end", spacing=0),
+           _t(x + width - 6, y + 40, "/100", 10, "soft", "end")]
+
+    def cells(top, specs):
+        cx, parts = x, []
+        for i, (label, value, w, cls) in enumerate(specs):
+            if i:
+                parts.append(_line(cx, top, cx, top + h2, "h"))
+            parts += [_t(cx + 6, top + 10, label, 8, "soft", spacing=0.8),
+                      _t(cx + 6, top + 24, value, 11, cls)]
+            cx += w
+        return parts
+
+    out += cells(y + h1, [("DWG NO.", f"AB-{result['scenario_hash'].upper()}", 110, ""),
+                          ("REV", _rev(len(history) - 1), 70, ""), ("SHEET", "1 OF 2", 72, ""),
+                          ("SCALE", "1 CELL = 1 CHECK", 132, "")])
+    out += cells(y + h1 + h2, [("COMMIT", result["commit"], 110, ""),
+                               ("SCENARIOS", str(result["scenario_count"]), 70, ""),
+                               ("VIOLATIONS", str(result["violations"]), 72,
+                                "red" if result["violations"] else ""),
+                               ("DATE UTC", result["ts"][:16].replace("T", " "), 132, "")])
+    return "".join(out)
+
+
+def _stamp(result: dict, history: list, cx: float, cy: float) -> str:
+    """The verdict as an inspection stamp: blue ink when releasable, red when not."""
+    bad = result["verdict"] in ("UNSAFE", "REGRESSED")
+    colour = REDLINE if bad else STAMP
+    if result["violations"]:
+        n = result["violations"]
+        sub = f"{n} VIOLATION{'S' if n != 1 else ''}, NOT FOR RELEASE"
+    elif result["delta"] is None:
+        sub = "FIRST MEASUREMENT"
+    elif result["verdict"] == "SAME":
+        sub = f"NO CHANGE AT {result['score']:.1f}"
+    else:
+        sub = f"{result['previous_score']:.1f} TO {result['score']:.1f}"
+    width, height = 214, 68
+    x, y = cx - width / 2, cy - height / 2
+    cls = "red" if bad else "blue"
+    return (f'<g transform="rotate(-5 {cx:.1f} {cy:.1f})" opacity="0.92">'
+            f'<rect x="{x:.1f}" y="{y:.1f}" width="{width}" height="{height}" fill="none" '
+            f'stroke="{colour}" stroke-width="2.4"/>'
+            f'<rect x="{x + 4:.1f}" y="{y + 4:.1f}" width="{width - 8}" height="{height - 8}" fill="none" '
+            f'stroke="{colour}" stroke-width="0.8"/>'
+            + _t(cx, y + 17, f"BENCH VERDICT  REV {_rev(len(history) - 1)}", 9, cls, "middle", 1.2)
+            + _t(cx, y + 44, result["verdict"], 27, cls, "middle", 3)
+            + _t(cx, y + 58, sub, 9, cls, "middle", 0.8) + "</g>")
 
 
 def svg(result: dict, history: list) -> str:
-    cls, symbol = VERDICTS[result["verdict"]]
-    parts, mutants = result["parts"], result["mutants"]
-    prev = history[-2] if len(history) > 1 else None
-    body = [f'<rect x="{PAD}" y="{PAD}" width="44" height="44" rx="10" class="{cls}"/>',
-            f'<path d="{symbol}" transform="translate({PAD},{PAD})" class="l-white"/>',
-            _text(PAD + 58, PAD + 21, result["verdict"], 22, weight="700"),
-            _text(PAD + 58, PAD + 41, _headline(result), 13, "t2"),
-            _text(W - PAD, PAD + 34, result["score"], 42, anchor="end", weight="700"),
-            _text(W - PAD, PAD + 52, "out of 100", 11, "tm", "end"),
-            _text(PAD, PAD + 72, f"{result['scenario_count']} scenarios (set {result['scenario_hash']})"
-                  f"  |  commit {result['commit']}  |  {result['ts'][:16].replace('T', ' ')} UTC", 11, "tm")]
-
-    def series(getter):
-        return [getter(row) for row in history[-20:]]
-
-    def change(now, getter, scale=1.0):
-        return None if prev is None else round((now - getter(prev)) * scale, 1)
-
-    tiles = [
-        ("Safety violations", str(result["violations"]),
-         change(result["violations"], lambda r: r["violations"]), False,
-         series(lambda r: r["violations"])),
-        ("Right decisions", _pct(parts["decisions"]),
-         change(parts["decisions"], lambda r: r["parts"]["decisions"], 100), True,
-         series(lambda r: r["parts"]["decisions"])),
-        ("Survives bad input", _pct(parts["robustness"]),
-         change(parts["robustness"], lambda r: r["parts"]["robustness"], 100), True,
-         series(lambda r: r["parts"]["robustness"])),
-        ("Receipts verify", _pct(parts["receipts"]),
-         change(parts["receipts"], lambda r: r["parts"]["receipts"], 100), True,
-         series(lambda r: r["parts"]["receipts"])),
-        ("Sabotage caught", f"{mutants['caught']}/{mutants['total']}",
-         change(mutants["caught"], lambda r: r["mutants_caught"]), True,
-         series(lambda r: r["mutants_caught"])),
-        ("Speed, not scored", f"{result['speed_ms']} ms",
-         change(result["speed_ms"], lambda r: r["speed_ms"]), False,
-         series(lambda r: r["speed_ms"])),
-    ]
-    tile_w = (W - 2 * PAD - 5 * 12) / 6
-    for i, (label, value, delta, higher_is_better, values) in enumerate(tiles):
-        good = delta is not None and ((delta > 0) == higher_is_better)
-        body.append(_tile(PAD + i * (tile_w + 12), 112, tile_w, label, value, delta, good, values))
-
-    matrix, y = _matrix(result, 228)
-    chart, y = _history(history, y + 18)
-    body += [matrix, chart]
-    height = y
-    return (f'<svg xmlns="http://www.w3.org/2000/svg" class="card" viewBox="0 0 {W} {height}" '
-            f'width="{W}" height="{height}" role="img" '
-            f'aria-label="Actor bench: {result["verdict"]}, score {result["score"]} of 100, '
-            f'{result["violations"]} safety violations">'
-            f"<style>{STYLE}</style>"
-            f'<rect width="{W}" height="{height}" rx="14" class="bg"/>{"".join(body)}</svg>')
+    view, y, flagged, total_failing = _view(result, 48)
+    lower = y + 22
+    acceptance, left_bottom = _acceptance(result, LEFT, lower)
+    notes, left_bottom = _notes(LEFT, left_bottom + 24, flagged, total_failing)
+    right_x = RIGHT - 384
+    revisions, rev_bottom = _revisions(history, right_x, lower)
+    block_h = 110
+    height = int(max(left_bottom + 14, rev_bottom + 96 + block_h) + FRAME + 6)
+    block_y = height - FRAME - 6 - block_h
+    stamp = _stamp(result, history, right_x + 192, (rev_bottom + block_y) / 2)
+    label = (f"Actor bench drawing sheet: {result['verdict']}, score {result['score']} of 100, "
+             f"{result['violations']} safety violations, {result['scenario_count']} scenarios")
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" class="sheet" viewBox="0 0 {W} {height}" '
+            f'width="{W}" height="{height}" role="img" aria-label="{escape(label)}">'
+            f"<style>{_style()}</style>{_frame(height)}{view}{acceptance}{notes}{revisions}"
+            f"{_title_block(result, history, right_x, block_y)}{stamp}</svg>")
 
 
-PAGE_STYLE = """
-:root{--page:#f6f5f1;--ink:#0b0b0b;--ink2:#52514e;--line:#e1e0d9;--good:#0ca30c;
---serious:#ec835a;--crit:#d03b3b;--muted:#898781}
-@media (prefers-color-scheme: dark){:root{--page:#111110;--ink:#fff;--ink2:#c3c2b7;--line:#2c2c2a}}
-body{margin:0;padding:24px 16px 48px;background:var(--page);color:var(--ink);
-font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-main{max-width:920px;margin:0 auto}svg{max-width:100%;height:auto;display:block}
-h2{font-size:15px;margin:28px 0 8px}table{border-collapse:collapse;width:100%;font-size:13px}
-th,td{text-align:left;padding:6px 10px 6px 0;border-bottom:1px solid var(--line);vertical-align:top}
-th{color:var(--ink2);font-weight:600}td.n{font-variant-numeric:tabular-nums;white-space:nowrap}
-.b{display:inline-block;min-width:54px;white-space:nowrap}.b i{display:inline-block;width:9px;
-height:9px;border-radius:2px;margin-right:6px}.pass i{background:var(--good)}
-.fail i{background:var(--serious)}.crash i{background:var(--serious);border-radius:50%}
-.unsafe i{background:var(--crit);transform:rotate(45deg)}
-ul{margin:4px 0;padding-left:20px}details{margin-top:18px}summary{cursor:pointer;color:var(--ink2)}
-code{font:12px ui-monospace,Consolas,monospace}.muted{color:var(--muted)}
-.scroll{overflow-x:auto}
+def _page_style() -> str:
+    return _font_face() + f"""
+:root{{--desk:#c9cfca;--paper:{PAPER};--ink:{INK};--soft:{SOFT};--rule:{RULE};--red:{REDLINE};--blue:{STAMP}}}
+@media (prefers-color-scheme: dark){{:root{{--desk:#1c2126}}}}
+*{{box-sizing:border-box}}
+html{{scrollbar-color:var(--soft) var(--desk)}}
+body{{margin:0;padding:28px 16px 56px;background:var(--desk);color:var(--ink);
+font:14px/1.5 "Segoe UI",system-ui,-apple-system,Roboto,sans-serif}}
+::selection{{background:var(--blue);color:var(--paper)}}
+main{{max-width:{W}px;margin:0 auto}}
+.sheet-wrap,section{{background:var(--paper);box-shadow:0 1px 2px #0003,0 10px 28px -12px #0006}}
+svg{{display:block;width:100%;height:auto}}
+section{{margin-top:22px;padding:22px 28px 26px;border:1.6px solid var(--ink);outline:1px solid var(--rule);
+outline-offset:6px}}
+h2{{font:400 15px/1.2 'Sheet',"Arial Narrow",sans-serif;letter-spacing:.08em;text-transform:uppercase;
+margin:30px 0 10px}}
+section>h2:first-child{{margin-top:0}}
+h2 small{{font-size:11px;color:var(--soft);letter-spacing:.06em;margin-left:10px}}
+table{{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}}
+th{{font:400 11px 'Sheet',"Arial Narrow",sans-serif;letter-spacing:.09em;text-transform:uppercase;
+color:var(--soft);text-align:left;padding:6px 12px 6px 2px;border-bottom:1.1px solid var(--ink)}}
+td{{padding:7px 12px 7px 2px;border-bottom:.5px solid var(--rule);vertical-align:top}}
+td.id{{font:400 12px 'Sheet',"Arial Narrow",sans-serif;letter-spacing:.04em;text-transform:uppercase;
+white-space:nowrap}}
+td.n{{white-space:nowrap}}
+.state{{font:400 12px 'Sheet',"Arial Narrow",sans-serif;letter-spacing:.07em;text-transform:uppercase;
+white-space:nowrap}}
+.state svg{{display:inline;width:10px;height:10px;margin-right:6px;vertical-align:-1px}}
+.bad{{color:var(--red)}}.muted{{color:var(--soft)}}
+ul{{margin:4px 0 0;padding:0;list-style:none;columns:2;column-gap:28px}}
+li{{font:400 12px 'Sheet',"Arial Narrow",sans-serif;letter-spacing:.04em;text-transform:uppercase;
+padding:3px 0;border-bottom:.5px solid var(--rule);break-inside:avoid}}
+details{{margin-top:18px}}
+summary{{font:400 12px 'Sheet',"Arial Narrow",sans-serif;letter-spacing:.08em;text-transform:uppercase;
+cursor:pointer;padding:8px 0;border-top:1.1px solid var(--ink);border-bottom:.5px solid var(--rule);
+list-style-position:inside}}
+summary:hover{{color:var(--blue)}}
+:focus-visible{{outline:2px solid var(--blue);outline-offset:2px}}
+.scroll{{overflow-x:auto}}
+p{{margin:8px 0 0;max-width:70ch}}
+@media (max-width:560px){{section{{padding:16px 14px 20px}}ul{{columns:1}}}}
 """
 
 
-def _badge(status: str) -> str:
-    return f'<span class="b {status}"><i></i>{status}</span>'
+def _state(status: str) -> str:
+    mark = _mark(0, 0, 10, {"pass": "acted", "fail": "missed"}.get(status, "forbidden"))
+    icon = f'<svg viewBox="0 0 10 10" aria-hidden="true">{mark}</svg>'
+    return f'<span class="state{"" if status == "pass" else " bad"}">{icon}{escape(status)}</span>'
 
 
 def _counts(mapping: dict) -> str:
-    return escape(", ".join(f"{k} {v}" for k, v in mapping.items())) or '<span class="muted">nothing</span>'
+    text = ", ".join(f"{k.replace('_', ' ')} {v}" for k, v in mapping.items())
+    return escape(text) or '<span class="muted">nothing</span>'
 
 
 def _rows(scenarios: list) -> str:
     return "".join(
-        f"<tr><td>{_badge(s['status'])}</td><td><code>{escape(s['id'])}</code><br>{escape(s['title'])}</td>"
-        f"<td>{_counts(s['expected'])}</td><td>{_counts(s['executed'])}</td>"
-        f"<td>{'<br>'.join(escape(p) for p in s['problems'][:4])}</td></tr>" for s in scenarios)
+        f"<tr><td>{_state(s['status'])}</td><td class='id'>{escape(s['id'])}</td>"
+        f"<td>{escape(s['title'])}</td><td>{_counts(s['expected'])}</td><td>{_counts(s['executed'])}</td>"
+        f"<td class='{'bad' if s['problems'] else ''}'>{'<br>'.join(escape(p) for p in s['problems'][:4])}</td></tr>"
+        for s in scenarios)
 
 
 def html(result: dict, history: list) -> str:
     flipped = result["flipped"]
     changed = ""
-    if flipped["fixed"] or flipped["broken"]:
-        for label, ids in (("Fixed", flipped["fixed"]), ("Broken", flipped["broken"])):
-            if ids:
-                changed += f"<p><b>{label} ({len(ids)})</b></p><ul>" + "".join(
-                    f"<li><code>{escape(i)}</code></li>" for i in ids) + "</ul>"
-    else:
-        changed = '<p class="muted">No scenario changed state since the last run.</p>'
+    for label, ids, cls in (("Fixed", flipped["fixed"], ""), ("Broken", flipped["broken"], "bad")):
+        if ids:
+            changed += (f'<h2 class="{cls}">{label}<small>{len(ids)} since the last revision</small></h2><ul>'
+                        + "".join(f"<li>{escape(i)}</li>" for i in ids) + "</ul>")
+    if not changed:
+        changed = ('<h2>Changes<small>since the last revision</small></h2>'
+                   '<p class="muted">No scenario changed state.</p>')
     failing = [s for s in result["scenarios"] if s["status"] != "pass"]
-    head = "<tr><th>State</th><th>Scenario</th><th>Must send</th><th>Sent</th><th>Problem</th></tr>"
-    attention = (f'<div class="scroll"><table>{head}{_rows(failing)}</table></div>' if failing
-                 else '<p class="muted">Every scenario passes.</p>')
+    head = ("<tr><th>State</th><th>Scenario</th><th>What it checks</th><th>Must send</th>"
+            "<th>Sent</th><th>Finding</th></tr>")
+    if failing:
+        attention = f'<div class="scroll"><table>{head}{_rows(failing)}</table></div>'
+    else:
+        attention = f'<p class="muted">None. All {len(result["scenarios"])} scenarios conform.</p>'
     missed = result["mutants"]["missed"]
-    sabotage = ("" if not missed else "<h2>Sabotage the range did not notice</h2><ul>"
+    sabotage = ("" if not missed else '<h2 class="bad">Sabotage the bench did not notice</h2><ul>'
                 + "".join(f"<li>{escape(m)}</li>" for m in missed) + "</ul>")
     runs = "".join(
-        f"<tr><td class='n'>{escape(r['ts'][11:16])}</td><td><code>{escape(r['commit'])}</code></td>"
-        f"<td class='n'>{r['score']}</td><td class='n'>{r['violations']}</td>"
-        f"<td class='n'>{r['scenario_count']}</td><td>{escape(r['verdict'])}</td></tr>"
-        for r in reversed(history))
+        f"<tr><td class='id'>{_rev(i)}</td><td class='n'>{escape(r['ts'][11:16])}</td>"
+        f"<td class='id'>{escape(r['commit'])}</td><td class='n'>{r['scenario_count']}</td>"
+        f"<td class='n{' bad' if r['violations'] else ''}'>{r['violations']}</td>"
+        f"<td class='n'>{r['score']:.1f}</td><td class='id{' bad' if r['violations'] else ''}'>"
+        f"{escape(r['verdict'])}</td></tr>" for i, r in reversed(list(enumerate(history))))
+    marks = (f"<style>.state svg .ink{{fill:{INK}}}.state svg .r{{stroke:{REDLINE};fill:none;"
+             f"stroke-width:1.4;stroke-linecap:round}}</style>")
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Actor bench</title><style>{PAGE_STYLE}</style></head><body><main>
-{svg(result, history)}
-<h2>Changed since the last run</h2>{changed}
-<h2>Needs attention ({len(failing)})</h2>{attention}
+<title>Actor bench, revision {_rev(len(history) - 1)}</title><style>{_page_style()}</style>{marks}</head><body><main>
+<div class="sheet-wrap">{svg(result, history)}</div>
+<section>
+<h2>Nonconformances<small>sheet 2 of 2, {len(failing)} open</small></h2>{attention}
+{changed}
 {sabotage}
 <details><summary>All {len(result['scenarios'])} scenarios</summary>
 <div class="scroll"><table>{head}{_rows(result['scenarios'])}</table></div></details>
-<details><summary>All {len(history)} runs</summary><div class="scroll"><table>
-<tr><th>Time (UTC)</th><th>Commit</th><th>Score</th><th>Violations</th><th>Scenarios</th><th>Verdict</th></tr>
+<details><summary>All {len(history)} revisions</summary><div class="scroll"><table>
+<tr><th>Rev</th><th>UTC</th><th>Commit</th><th>Scenarios</th><th>Violations</th><th>Score</th><th>State</th></tr>
 {runs}</table></div></details>
-<p class="muted">Score = 40 right decisions + 20 survives bad input + 20 receipts verify + 10 lifecycle
-+ 10 sabotage caught. Any safety violation makes the run UNSAFE whatever the score.</p>
+</section>
 </main></body></html>
 """
 
