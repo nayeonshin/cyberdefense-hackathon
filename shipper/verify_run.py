@@ -29,12 +29,29 @@ def inspect_run(settings):
         return None
     if findings["event_id"] != event["event_id"] or meta.get("scanner") != "semgrep":
         raise RuntimeError("Scan evidence does not match the event")
+    database_verified = False
+    if settings.source == "clickhouse":
+        from .data import ClickHouseSource
+        source = ClickHouseSource(settings)
+        try:
+            database_events = source.get_events()
+            database_receipts = source.get_receipts(event["event_id"])
+            metrics = source.get_metrics()
+            database_verified = (len(database_events) == 1
+                and database_events[0]["event"]["event_id"] == event["event_id"]
+                and bool(database_events[0]["metadata"].get("scan_completed_at"))
+                and any(r["status"] == "CONFIRMED_DOWN" for r in database_receipts)
+                and metrics["submitted_actions"] == 1 and metrics["detected"] == 1)
+        finally:
+            source.close()
+        if not database_verified:
+            return None  # The worker may still be flushing its durable receipts.
     elapsed = (parse_time(confirmed[0]["created_at"]) - parse_time(meta["ingested_at"])).total_seconds()
     return {"run_id": settings.run_id, "event_id": event["event_id"], "controlled": True,
         "scanner": "semgrep", "findings": len(findings["findings"]), "submitted_receipts": len(sent),
         "confirmed_suspension": True, "http_status": 410, "elapsed_seconds": round(elapsed, 3),
         "within_recording_window": 0 <= elapsed <= 180, "data_source": settings.source,
-        "clickhouse_verified": settings.source == "clickhouse", "checked_at": check["checked_at"]}
+        "clickhouse_verified": database_verified, "checked_at": check["checked_at"]}
 
 
 def main():

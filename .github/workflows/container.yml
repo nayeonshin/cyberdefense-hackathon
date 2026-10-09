@@ -32,8 +32,21 @@ jobs:
           tags: ghcr.io/nayeonshin/cyberdefense-hackathon:${{ github.sha }}
       - name: Container smoke and persistence test
         run: |
-          docker run -d --name demo -p 8501:8501 -v demo-data:/data \
-            -e DATA_SOURCE=files -e RUN_MODE=controlled -e RUN_ID=ci-controlled \
+          docker network create demo-net
+          docker run -d --name clickhouse-ci --network demo-net \
+            -e CLICKHOUSE_USER=demo -e CLICKHOUSE_PASSWORD=ci-only \
+            -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 \
+            clickhouse/clickhouse-server:25.8@sha256:0152dd511befe6a2c2ef53e930726179669b08116da78500b37c51c96ff5ee77
+          for attempt in $(seq 1 30); do
+            if docker exec clickhouse-ci clickhouse-client --user demo --password ci-only --query 'SELECT 1'; then break; fi
+            sleep 2
+          done
+          docker exec clickhouse-ci clickhouse-client --user demo --password ci-only --query 'SELECT 1'
+          docker run -d --name demo --network demo-net -p 8501:8501 -v demo-data:/data \
+            -e DATA_SOURCE=clickhouse -e EVENTS_TABLE=shipper_events \
+            -e CLICKHOUSE_HOST=clickhouse-ci -e CLICKHOUSE_PORT=8123 \
+            -e CLICKHOUSE_USER=demo -e CLICKHOUSE_PASSWORD=ci-only -e CLICKHOUSE_SECURE=0 \
+            -e RUN_MODE=controlled -e RUN_ID=ci-controlled \
             -e 'TEAM_PIPELINE_COMMAND_JSON=["python","-m","shipper.team_pipeline"]' \
             ghcr.io/nayeonshin/cyberdefense-hackathon:${{ github.sha }}
           for attempt in $(seq 1 30); do
@@ -52,6 +65,7 @@ jobs:
           done
           docker logs demo
           docker stop demo
+          docker stop clickhouse-ci
       - uses: actions/upload-artifact@v4
         with:
           name: controlled-pipeline-evidence

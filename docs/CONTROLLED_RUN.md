@@ -60,3 +60,9 @@ contract reference; do not apply it over Member 1's table.
 - Akash: only count a running lease after browser live updates are verified.
 - Guild: Member 2 documents review-only tests on Guild. Obtain their actual trace;
   this adapter does not invoke Guild or claim its use.
+
+The container acceptance job creates a fresh, isolated ClickHouse container on a
+private Docker network. It runs the database adapter, actual Semgrep and Actor,
+then restarts the application with the same ledger volume and verifies database
+receipts plus a fresh suspension check. Its disposable `ci-only` password is not
+a deployment credential. Passing CI verifies integration, not a public cloud service.
