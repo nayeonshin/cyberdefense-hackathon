@@ -57,7 +57,8 @@ def test_run_stats_failure_does_not_undo_successful_ingestion(monkeypatch):
 def test_dashboard_stats_read_recent_runs_and_close_owned_client(monkeypatch, exists):
     queries, closed = [], []
     results = [[("openphish", 2, 1)], [("phishing", 2)], [("PENDING", 1), ("SCANNED", 1)],
-               [(1760011200, "openphish", 3, 2, 1, 1, "", 50)]]
+               [(1760011200, "openphish", 3, 2, 1, 1, "", 50)],
+               [("openphish", 1, 0, 3, 1, 1, 50, 0, 1)]]
     def query(sql, **kwargs):
         queries.append((sql, kwargs))
         if "system.tables" in sql:
@@ -71,7 +72,7 @@ def test_dashboard_stats_read_recent_runs_and_close_owned_client(monkeypatch, ex
     if exists:
         assert data["recent_runs"][0]["mapped"] == 2
         assert data["recent_runs"][0]["run_ts"].utcoffset().total_seconds() == 0
-        assert queries[-1][1]["parameters"] == {"n": 2}
+        assert queries[-2][1]["parameters"] == {"n": 2}
     else:
         assert data["recent_runs"] == []
 
