@@ -27,8 +27,7 @@ jobs:
           path.write_text(json.dumps(config))
           PY
           sudo systemctl restart docker
-          # These dependencies are public. Hosted-runner Hub credentials otherwise
-          # bypass the anonymous mirror and can hang in Hub's token endpoint.
+          # Public dependencies don't require the runner's Docker Hub credentials.
           docker logout docker.io
       - uses: docker/setup-buildx-action@v3
         with:
@@ -49,10 +48,17 @@ jobs:
       - name: Container smoke and persistence test
         run: |
           docker network create demo-net
+          ci_clickhouse_image=clickhouse/clickhouse-server:25.8@sha256:0152dd511befe6a2c2ef53e930726179669b08116da78500b37c51c96ff5ee77
+          if docker pull "mirror.gcr.io/$ci_clickhouse_image"; then
+            docker tag "mirror.gcr.io/$ci_clickhouse_image" clickhouse-ci:verified
+          else
+            docker pull "$ci_clickhouse_image"
+            docker tag "$ci_clickhouse_image" clickhouse-ci:verified
+          fi
           docker run -d --name clickhouse-ci --network demo-net \
             -e CLICKHOUSE_USER=demo -e CLICKHOUSE_PASSWORD=ci-only \
             -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 \
-            clickhouse/clickhouse-server:25.8@sha256:0152dd511befe6a2c2ef53e930726179669b08116da78500b37c51c96ff5ee77
+            clickhouse-ci:verified
           for attempt in $(seq 1 30); do
             if docker exec clickhouse-ci clickhouse-client --user demo --password ci-only --query 'SELECT 1'; then break; fi
             sleep 2
