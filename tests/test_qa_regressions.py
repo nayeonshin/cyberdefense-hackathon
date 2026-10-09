@@ -102,6 +102,23 @@ def test_acceptance_waits_for_worker_recovery(tmp_path):
     assert inspect_run(settings)["submitted_receipts"] == 1
 
 
+def test_acceptance_wait_retries_connections_without_leaking_messages(tmp_path, monkeypatch, capsys):
+    from unittest.mock import Mock
+    from clickhouse_connect.driver.exceptions import OperationalError
+    from shipper import verify_run
+    from tests.test_shipper import config
+    inspect = Mock(side_effect=[OperationalError("private connection detail"), {"within_recording_window": True}])
+    monkeypatch.setattr(verify_run, "inspect_run", inspect)
+    monkeypatch.setattr(verify_run.Settings, "from_env", lambda: config(tmp_path))
+    monkeypatch.setattr(verify_run.time, "sleep", lambda _: None)
+    monkeypatch.setattr("sys.argv", ["verify_run", "--wait", "1"])
+    verify_run.main()
+    assert inspect.call_count == 2
+    output = capsys.readouterr().out
+    assert "Waiting for dependency recovery" in output
+    assert "private connection detail" not in output
+
+
 def test_crash_after_receipt_before_recheck_state_recovers(tmp_path, monkeypatch):
     from shipper.controlled import start_registrar
     from shipper.data import FileSource

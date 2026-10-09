@@ -2,6 +2,8 @@
 import argparse
 import json
 import time
+from clickhouse_connect.driver.exceptions import OperationalError
+from requests import RequestException
 
 from .model import current_confirmation, parse_time
 from .settings import Settings
@@ -70,7 +72,13 @@ def main():
         raise SystemExit("A real controlled run is required")
     deadline = time.monotonic() + args.wait
     while time.monotonic() < deadline:
-        result = inspect_run(settings, args.previous_started_at)
+        try:
+            result = inspect_run(settings, args.previous_started_at)
+        except (OperationalError, RequestException, OSError) as exc:
+            # Drivers can include credentials in messages. Retry availability only;
+            # integrity failures (such as duplicate dispatch) must still fail fast.
+            print(f"Waiting for dependency recovery ({type(exc).__name__}).", flush=True)
+            result = None
         if result:
             if not result["within_recording_window"]:
                 raise SystemExit("Controlled run exceeded 180 seconds")
