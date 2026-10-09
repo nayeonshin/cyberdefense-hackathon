@@ -1,0 +1,69 @@
+# The whole backend on Akash: controlled target, scanner worker, scanner HTTP API and the Actor loop,
+# on tables of their own (akash_threats, akash_events, akash_actions) in the team's ClickHouse service.
+# Every four minutes it reports the controlled target to itself and takes it down, unattended.
+# Port 80 is the scanner API (POST /scan with X-API-Key), port 8099 the controlled target.
+version: "2.0"
+services:
+  backend:
+    image: python:3.12-slim
+    env:
+      - CLICKHOUSE_HOST=el8hqe4ato.us-east-2.aws.clickhouse.cloud
+      - CLICKHOUSE_PORT=8443
+      - CLICKHOUSE_SECURE=1
+      - CLICKHOUSE_USER=team_dashboard
+      - CLICKHOUSE_PASSWORD=REPLACE_WITH_TEAM_PASSWORD
+      - CLICKHOUSE_DATABASE=default
+      - THREATS_TABLE=akash_threats
+      - EVENTS_TABLE=akash_threats
+      - VERDICTS_TABLE=akash_events
+      - ACTIONS_TABLE=akash_actions
+      - HISTORY_LOOKUP=1
+      - BRAIN_ALLOW_PRIVATE=1
+      - BRAIN_API_KEY=REPLACE_WITH_A_LONG_RANDOM_KEY
+      - PYTHONUTF8=1
+      - PYTHONUNBUFFERED=1
+      - HOST=0.0.0.0
+      - PORT=8099
+    command:
+      - sh
+      - -c
+      - >-
+        apt-get update && apt-get install -y --no-install-recommends git ca-certificates &&
+        git clone --depth 1 -b member3-actor https://github.com/nayeonshin/cyberdefense-hackathon /app &&
+        cd /app && pip install --no-cache-dir -r requirements.txt semgrep &&
+        (python -m actor.mock_registrar_server &) &&
+        (uvicorn brain.service:app --host 0.0.0.0 --port 8002 &) &&
+        (python -m brain.worker --interval 5 &) &&
+        (python -u -m actor.intake --live --loop --interval 10 &) &&
+        sleep 45 &&
+        while true; do python -m actor.stage || sleep 30; sleep 240; done
+    expose:
+      - port: 8002
+        as: 80
+        to:
+          - global: true
+      - port: 8099
+        as: 8099
+        to:
+          - global: true
+profiles:
+  compute:
+    backend:
+      resources:
+        cpu:
+          units: 4
+        memory:
+          size: 8Gi
+        storage:
+          size: 10Gi
+  placement:
+    akash:
+      pricing:
+        backend:
+          denom: uact
+          amount: 10000
+deployment:
+  backend:
+    akash:
+      profile: backend
+      count: 1
