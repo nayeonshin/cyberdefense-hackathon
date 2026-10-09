@@ -1,0 +1,17 @@
+.git
+.venv
+.runtime
+.pytest_cache
+__pycache__
+**/__pycache__
+*.pyc
+.env
+.env.*
+!.env.example
+deploy.private.yaml
+work
+outputs
+ledger
+outbox
+*.mp4
+*.webm

@@ -1,0 +1,2 @@
+# Member 1 and Member 2: add pinned dependencies when their modules arrive.
+# Semgrep / Guild AI have NOT been installed or verified by this placeholder.
