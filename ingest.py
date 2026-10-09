@@ -1,26 +1,41 @@
 #!/usr/bin/env python3
 """
-Active Threat Takedown Orchestrator -- URLhaus -> ClickHouse ingest.
+Active Threat Takedown Orchestrator -- URLhaus -> ClickHouse ingest (Member 1).
 
-Fetches the most recent malware URLs from the URLhaus API, maps them onto our
-`incoming_threats` schema, and bulk-inserts them into a local ClickHouse
-instance so the takedown pipeline can pick them up.
+Polls the live URLhaus `/v1/urls/recent/` feed, maps each record onto the
+`incoming_threats` schema
+
+    event_id, target_url, domain, ip_address, timestamp, threat_type,
+    takedown_status (default 'PENDING'), feed_source, first_seen
+
+drops records whose `event_id` is already stored, and bulk-inserts the rest
+into ClickHouse. Member 2 consumes the result through `threatfeed.py`.
+
+Behaviour worth knowing:
+  * `date_added` is accepted as "YYYY-MM-DD HH:MM:SS", the same with a
+    trailing " UTC" (the live format), or ISO-8601 with a `T`; always UTC.
+  * If the feed returned records that pass the filter but *none* of them map,
+    the run exits 3 instead of pretending to succeed.
+  * `ip_address` is filled only when URLhaus's `host` is an IP literal, unless
+    `--resolve-dns` is given (best-effort, short timeout, never raises).
 
 Usage:
-    python3 ingest.py                      # ingest the 50 most recent records
-    python3 ingest.py --limit 10           # ingest fewer records
+    python3 ingest.py                         # one-shot: 50 most recent records
+    python3 ingest.py --limit 10              # fewer records
     python3 ingest.py --threat-type phishing  # only rows whose threat == phishing
-    python3 ingest.py --resolve-dns        # best-effort DNS for hostnames (slow, off by default)
-    python3 ingest.py --dry-run            # fetch + map only, do not touch the DB
-    python3 ingest.py --recreate           # DROP + recreate the table, then ingest
-    python3 ingest.py --self-test          # run the timestamp-parser self-check, no network
+    python3 ingest.py --resolve-dns           # best-effort DNS for hostnames (off by default)
+    python3 ingest.py --dry-run               # fetch + map only, do not touch the DB
+    python3 ingest.py --reset-schema          # DROP + recreate the table, then ingest
+    python3 ingest.py --interval 600          # keep polling every 600 s (minimum 300)
+    python3 ingest.py --self-test             # timestamp-parser self-check, no network
 
-Required environment (read from .env / clickhouse.env, or the process env):
+Environment (read from .env / clickhouse.env, or the process env):
     CLICKHOUSE_HOST       default: localhost  (or a ClickHouse Cloud host)
     CLICKHOUSE_PORT       default: 8123, or 8443 when CLICKHOUSE_SECURE is on
     CLICKHOUSE_USER       default: default
     CLICKHOUSE_PASSWORD   default: (empty)
     CLICKHOUSE_SECURE     default: off; set to 1 for ClickHouse Cloud (HTTPS)
+    THREATS_TABLE         default: incoming_threats (tests point this elsewhere)
     URLHAUS_AUTH_KEY      required -- see https://auth.abuse.ch/
 """
 
@@ -30,9 +45,12 @@ import argparse
 import ipaddress
 import logging
 import os
+import re
 import socket
 import sys
+import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any, Sequence
 from urllib.parse import urlsplit
@@ -59,7 +77,11 @@ URLHAUS_TIME_FORMATS: tuple[str, ...] = (
     "%Y-%m-%dT%H:%M:%S",
 )
 
-TABLE_NAME = "incoming_threats"
+TABLE_NAME = "incoming_threats"  # default; override with THREATS_TABLE
+TABLE_ENV_VAR = "THREATS_TABLE"
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+DNS_TIMEOUT_SECONDS = 2.0
+MIN_POLL_INTERVAL_SECONDS = 300
 # `first_seen` is deliberately absent: the DDL default `now()` fills it
 # server-side so it measures ingestion time, not the client's clock.
 COLUMN_NAMES = [
@@ -78,8 +100,8 @@ DEFAULT_FEED_SOURCE = "urlhaus"
 DEFAULT_LIMIT = 50
 DEFAULT_THREAT_TYPE = "all"
 
-CREATE_TABLE_DDL = f"""
-CREATE TABLE IF NOT EXISTS {TABLE_NAME}
+CREATE_TABLE_TEMPLATE = """
+CREATE TABLE IF NOT EXISTS {table}
 (
     event_id        String,                                    -- URLhaus `id`, the dedup key
     target_url      String,                                    -- URLhaus `url`
@@ -87,13 +109,14 @@ CREATE TABLE IF NOT EXISTS {TABLE_NAME}
     ip_address      String,                                    -- '' when unknown
     `timestamp`     DateTime,                                  -- URLhaus `date_added`, UTC
     threat_type     String,                                    -- URLhaus `threat`
-    takedown_status String DEFAULT '{DEFAULT_TAKEDOWN_STATUS}',
-    feed_source     LowCardinality(String) DEFAULT '{DEFAULT_FEED_SOURCE}',
+    takedown_status String DEFAULT 'PENDING',
+    feed_source     LowCardinality(String) DEFAULT 'urlhaus',
     first_seen      DateTime DEFAULT now()
 )
 ENGINE = MergeTree
 ORDER BY `timestamp`
 """
+CREATE_TABLE_DDL = CREATE_TABLE_TEMPLATE.format(table=TABLE_NAME)
 
 log = logging.getLogger("ingest")
 
@@ -103,13 +126,34 @@ log = logging.getLogger("ingest")
 # --------------------------------------------------------------------------- #
 
 
+def table_name(explicit: str | None = None) -> str:
+    """Return the threats table to use: `explicit`, else $THREATS_TABLE, else default.
+
+    Table names cannot be bound as query parameters in DDL, so the name is
+    validated as a plain identifier before it is ever placed into SQL.
+    """
+    name = (explicit or os.getenv(TABLE_ENV_VAR, "") or TABLE_NAME).strip()
+    if not _IDENTIFIER_RE.match(name):
+        raise RuntimeError(
+            f"Invalid table name {name!r}: only letters, digits and '_' are allowed"
+        )
+    return name
+
+
 def load_environment() -> None:
-    """Populate os.environ from the first available dotenv file."""
+    """Populate os.environ from the available dotenv files.
+
+    Looks in the current directory first, then next to this file, so that
+    `threatfeed` works when imported from another working directory.
+    """
     loaded: list[str] = []
-    for candidate in ENV_FILE_CANDIDATES:
-        if os.path.isfile(candidate):
-            load_dotenv(candidate, override=False)
-            loaded.append(candidate)
+    here = os.path.dirname(os.path.abspath(__file__))
+    for directory in dict.fromkeys((os.getcwd(), here)):
+        for name in ENV_FILE_CANDIDATES:
+            candidate = os.path.join(directory, name)
+            if os.path.isfile(candidate):
+                load_dotenv(candidate, override=False)
+                loaded.append(os.path.relpath(candidate))
 
     if loaded:
         log.info("Loaded environment from: %s", ", ".join(loaded))
@@ -152,38 +196,45 @@ def connect_clickhouse() -> clickhouse_connect.driver.client.Client:
 
 
 def ensure_schema(
-    client: clickhouse_connect.driver.client.Client, recreate: bool = False
+    client: clickhouse_connect.driver.client.Client,
+    recreate: bool = False,
+    *,
+    table: str | None = None,
 ) -> None:
-    """Create `incoming_threats`, optionally dropping a stale table first.
+    """Create the threats table, optionally dropping a stale one first.
 
-    The brief's column set differs from the table that shipped with the repo, so
-    the intended path is a one-off `--recreate` (DROP + CREATE), not a migration.
-    Without `--recreate` a mismatched table is refused loudly rather than
-    silently accepting inserts into the wrong shape.
+    `CREATE TABLE IF NOT EXISTS` can never repair a table with the old column
+    set, so the repair path is an explicit `--reset-schema` (DROP + CREATE; the
+    table only ever held test data). Without it a mismatched table is refused
+    loudly rather than silently accepting inserts into the wrong shape.
     """
+    table = table_name(table)
     if recreate:
         log.warning(
-            "--recreate: dropping %s and recreating it (existing rows are lost)",
-            TABLE_NAME,
+            "--reset-schema: dropping %s and recreating it (existing rows are lost)",
+            table,
         )
-        client.command(f"DROP TABLE IF EXISTS {TABLE_NAME}")
+        client.command(f"DROP TABLE IF EXISTS {table}")
 
-    log.info("Ensuring table %s exists (MergeTree, ORDER BY timestamp)", TABLE_NAME)
-    client.command(CREATE_TABLE_DDL)
-    assert_schema(client)
+    log.info("Ensuring table %s exists (MergeTree, ORDER BY timestamp)", table)
+    client.command(CREATE_TABLE_TEMPLATE.format(table=table))
+    assert_schema(client, table=table)
 
 
-def assert_schema(client: clickhouse_connect.driver.client.Client) -> None:
+def assert_schema(
+    client: clickhouse_connect.driver.client.Client, *, table: str | None = None
+) -> None:
     """Fail loudly if the live table does not match the expected column set."""
-    result = client.query(f"DESCRIBE TABLE {TABLE_NAME}")
+    table = table_name(table)
+    result = client.query(f"DESCRIBE TABLE {table}")
     actual = {row[0] for row in result.result_rows}
     missing = sorted(EXPECTED_COLUMNS - actual)
     unexpected = sorted(actual - EXPECTED_COLUMNS)
     if missing or unexpected:
         raise RuntimeError(
-            f"{TABLE_NAME} does not match the brief "
+            f"{table} does not match the brief "
             f"(missing={missing}, unexpected={unexpected}). "
-            "Re-run with --recreate to rebuild it."
+            "Re-run with --reset-schema to rebuild it."
         )
 
 
@@ -240,44 +291,69 @@ def is_ip_literal(value: str) -> bool:
     return True
 
 
-def _host_of(value: str) -> str:
-    """Reduce a URL or bare `host[:port]` to a lowercased, port-stripped host.
+def _host_of(value: str, *, is_url: bool = False) -> str:
+    """Reduce a URL (`is_url=True`) or a bare `host[:port]` to a clean host.
 
-    Returns '' when nothing host-like can be extracted. IPv6 literals keep their
-    brackets stripped (e.g. '[::1]:80' -> '::1').
+    Lowercased, port stripped, trailing dot removed; IPv6 brackets dropped
+    (e.g. '[::1]:80' -> '::1'). A URL is parsed strictly with
+    `urlsplit(url).hostname`, so a scheme-less string yields ''. Returns ''
+    when nothing host-like can be extracted (including hosts with whitespace).
     """
     value = value.strip()
     if not value:
         return ""
-    candidate = value if "//" in value else f"//{value}"
+    candidate = value if is_url or "//" in value else f"//{value}"
     try:
         host = urlsplit(candidate).hostname or ""
     except ValueError:
         host = ""
-    return host.strip().lower()
+    host = host.strip().lower().rstrip(".")
+    if not host or any(ch.isspace() for ch in host):
+        return ""
+    return host
 
 
 def derive_domain(host: Any, target_url: str) -> str:
     """Derive the grouping key `domain` (MEMBER1_PLAN.md 4.4).
 
-    Prefers the API's `host`; falls back to the hostname inside `target_url`;
-    lowercases; strips the port; keeps an IP literal as its own value; never
-    returns an empty string (last resort is the lowercased `target_url`).
+    Prefers the API's `host`; falls back to `urlsplit(target_url).hostname`;
+    lowercases; strips the port and a trailing dot; keeps an IP literal as its
+    own value. Returns '' only when neither source yields a host -- callers
+    must skip such a row, never store an empty domain.
     """
-    for candidate in (host if isinstance(host, str) else "", target_url):
-        domain = _host_of(candidate)
-        if domain:
-            return domain
-    return (target_url or "").strip().lower()
+    domain = _host_of(host) if isinstance(host, str) else ""
+    if not domain:
+        domain = _host_of(target_url or "", is_url=True)
+    return domain
+
+
+_dns_pool: ThreadPoolExecutor | None = None
+
+
+def _resolve_with_timeout(hostname: str, timeout: float = DNS_TIMEOUT_SECONDS) -> str:
+    """Resolve `hostname` to an IPv4 string within `timeout` seconds, else ''.
+
+    `socket.gethostbyname` has no timeout of its own, so it runs in a small
+    worker pool and the caller stops waiting after `timeout`. Never raises.
+    """
+    global _dns_pool
+    try:
+        if _dns_pool is None:
+            _dns_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="dns")
+        resolved = _dns_pool.submit(socket.gethostbyname, hostname).result(timeout=timeout)
+    except Exception:  # noqa: BLE001 -- best-effort by design (D3)
+        log.debug("DNS resolution failed or timed out for %r; storing ''", hostname)
+        return ""
+    return resolved if is_ip_literal(resolved) else ""
 
 
 def derive_ip_address(host: Any, resolve_dns: bool = False) -> str:
     """Return the host as an IP literal, else '' (D3).
 
-    Fills the column only when URLhaus's `host` is already an IP literal. With
-    `resolve_dns` enabled a hostname is resolved best-effort via
-    `socket.gethostbyname`; any failure (blocked DNS, NXDOMAIN, timeout) yields
-    ''. This never raises, so it can never break the ingest path.
+    Fills the column only when URLhaus's `host` is already an IP literal
+    (`ipaddress.ip_address`). With `resolve_dns` enabled a hostname is
+    resolved best-effort with a short timeout; any failure (blocked DNS,
+    NXDOMAIN, timeout) yields ''. This never raises.
     """
     bare = _host_of(host) if isinstance(host, str) else ""
     if not bare:
@@ -285,11 +361,7 @@ def derive_ip_address(host: Any, resolve_dns: bool = False) -> str:
     if is_ip_literal(bare):
         return bare
     if resolve_dns:
-        try:
-            return socket.gethostbyname(bare)
-        except OSError:
-            log.debug("DNS resolution failed for %r; storing ''", bare)
-            return ""
+        return _resolve_with_timeout(bare)
     return ""
 
 
@@ -372,6 +444,24 @@ def log_threat_breakdown(
         )
 
 
+def select_records(
+    records: Sequence[dict[str, Any]],
+    limit: int,
+    threat_type: str = DEFAULT_THREAT_TYPE,
+) -> list[Any]:
+    """Apply the `threat_type` filter (D2), then take the first `limit` records."""
+    filtered = [
+        record
+        for record in records
+        if threat_type == DEFAULT_THREAT_TYPE
+        or (
+            isinstance(record, dict)
+            and str(record.get("threat") or "").strip() == threat_type
+        )
+    ]
+    return filtered[:limit]
+
+
 def map_records(
     records: Sequence[dict[str, Any]],
     limit: int,
@@ -382,16 +472,11 @@ def map_records(
     """Map the first `limit` matching URLhaus records onto the table columns.
 
     `threat_type` filters the window before `limit` is applied (default 'all').
-    Rows that cannot satisfy the schema (missing id/url, unparseable timestamp)
-    are skipped with a warning rather than aborting the whole batch.
+    Rows that cannot satisfy the schema (missing id/url, unparseable timestamp,
+    no derivable domain) are skipped with a warning rather than aborting the
+    whole batch; `main()` turns "everything skipped" into a non-zero exit.
     """
-    filtered = [
-        record
-        for record in records
-        if threat_type == DEFAULT_THREAT_TYPE
-        or str((record or {}).get("threat") or "").strip() == threat_type
-    ]
-    selected = filtered[:limit]
+    selected = select_records(records, limit, threat_type)
     rows: list[tuple[Any, ...]] = []
     skipped: list[str] = []
 
@@ -414,11 +499,19 @@ def map_records(
             )
             continue
 
+        domain = derive_domain(host, target_url)
+        if not domain:
+            skipped.append(
+                f"#{index}: id={event_id!r} no domain derivable from "
+                f"host={host!r} url={target_url!r}"
+            )
+            continue
+
         rows.append(
             (
                 event_id,
                 target_url,
-                derive_domain(host, target_url),
+                domain,
                 derive_ip_address(host, resolve_dns),
                 timestamp,
                 threat,
@@ -444,54 +537,77 @@ def map_records(
 def drop_duplicates(
     client: clickhouse_connect.driver.client.Client,
     rows: Sequence[tuple[Any, ...]],
+    *,
+    table: str | None = None,
 ) -> tuple[list[tuple[Any, ...]], int]:
     """Remove rows whose `event_id` is already in the table (4.3).
 
     `urls/recent/` is a sliding window, so re-polling re-presents overlapping
-    URLs. Returns (fresh_rows, duplicate_count).
+    URLs. Also collapses repeats inside the batch itself. The lookup is a
+    parameterized query. Returns (fresh_rows, duplicate_count).
     """
     if not rows:
         return list(rows), 0
 
-    event_ids = [str(row[0]) for row in rows]
+    table = table_name(table)
+    event_ids = sorted({str(row[0]) for row in rows})
     result = client.query(
-        f"SELECT event_id FROM {TABLE_NAME} WHERE event_id IN {{ids:Array(String)}}",
+        f"SELECT DISTINCT event_id FROM {table} WHERE event_id IN {{ids:Array(String)}}",
         parameters={"ids": event_ids},
     )
     existing = {row[0] for row in result.result_rows}
-    if not existing:
-        return list(rows), 0
 
-    fresh = [row for row in rows if str(row[0]) not in existing]
+    fresh: list[tuple[Any, ...]] = []
+    seen: set[str] = set(existing)
+    for row in rows:
+        key = str(row[0])
+        if key in seen:
+            continue
+        seen.add(key)
+        fresh.append(row)
     return fresh, len(rows) - len(fresh)
 
 
 def insert_rows(
-    client: clickhouse_connect.driver.client.Client, rows: Sequence[tuple[Any, ...]]
+    client: clickhouse_connect.driver.client.Client,
+    rows: Sequence[tuple[Any, ...]],
+    *,
+    table: str | None = None,
 ) -> int:
     """Bulk-insert mapped rows in a single client.insert() call."""
     if not rows:
-        log.warning("No new rows to insert -- skipping insert entirely")
+        log.info("No new rows to insert -- skipping insert entirely")
         return 0
 
+    table = table_name(table)
     log.info(
         "Bulk-inserting %d rows into %s with columns %s",
         len(rows),
-        TABLE_NAME,
+        table,
         ", ".join(COLUMN_NAMES),
     )
-    client.insert(TABLE_NAME, list(rows), column_names=COLUMN_NAMES)
+    client.insert(table, list(rows), column_names=COLUMN_NAMES)
     log.info("Insert completed")
     return len(rows)
 
 
-def report_table_state(client: clickhouse_connect.driver.client.Client) -> None:
+def report_table_state(
+    client: clickhouse_connect.driver.client.Client, *, table: str | None = None
+) -> int:
     """Log the resulting row count so the run can be verified at a glance."""
+    table = table_name(table)
     result = client.query(
-        f"SELECT count(), max(`timestamp`) FROM {TABLE_NAME}"
+        f"SELECT count(), countIf(takedown_status = 'PENDING'), max(`timestamp`) FROM {table}"
     )
-    total, newest = result.first_row
-    log.info("Verification: %s holds %s row(s); newest timestamp = %s", TABLE_NAME, total, newest)
+    total, pending, newest = result.first_row
+    log.info(
+        "Verification: %s holds %s row(s), %s PENDING; newest timestamp = %s",
+        table,
+        total,
+        pending,
+        newest,
+    )
+    return int(total)
 
 
 # --------------------------------------------------------------------------- #
@@ -565,9 +681,24 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="fetch and map records, but do not create the table or insert",
     )
     parser.add_argument(
+        "--reset-schema",
         "--recreate",
+        dest="reset_schema",
         action="store_true",
-        help="DROP and recreate the table before inserting (destroys existing rows)",
+        help=(
+            "DROP and recreate the table before inserting (destroys existing rows); "
+            "needed once to replace a table with an outdated column set"
+        ),
+    )
+    parser.add_argument(
+        "--interval",
+        type=int,
+        default=0,
+        metavar="SECONDS",
+        help=(
+            "keep polling every SECONDS (default: off = one-shot; minimum "
+            f"{MIN_POLL_INTERVAL_SECONDS} to respect URLhaus rate limits)"
+        ),
     )
     parser.add_argument(
         "--self-test",
@@ -578,6 +709,76 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--verbose", "-v", action="store_true", help="enable debug logging"
     )
     return parser.parse_args(argv)
+
+
+EXIT_OK = 0
+EXIT_RUNTIME = 1
+EXIT_USAGE = 2
+EXIT_NOTHING_MAPPED = 3
+
+
+def run_once(args: argparse.Namespace, *, reset_schema: bool) -> int:
+    """One poll: fetch -> map -> dedup -> insert. Returns a process exit code."""
+    client = None
+    try:
+        records = fetch_recent_urls()
+        log_threat_breakdown(records, args.threat_type)
+        candidates = select_records(records, args.limit, args.threat_type)
+        rows = map_records(
+            records,
+            args.limit,
+            threat_type=args.threat_type,
+            resolve_dns=args.resolve_dns,
+        )
+
+        if candidates and not rows:
+            log.error(
+                "Mapped 0/%d records although the feed returned %d record(s) "
+                "matching threat_type=%r -- every record failed validation. "
+                "This is the signature of a `date_added` format mismatch; "
+                "refusing to report success.",
+                len(candidates),
+                len(records),
+                args.threat_type,
+            )
+            return EXIT_NOTHING_MAPPED
+        if not candidates:
+            log.warning(
+                "No records match threat_type=%r in this poll (feed returned %d); "
+                "nothing to ingest",
+                args.threat_type,
+                len(records),
+            )
+
+        if args.dry_run:
+            log.info("Dry run: %d row(s) mapped, database untouched", len(rows))
+            for row in rows[:5]:
+                log.info("  %s", row)
+            if len(rows) > 5:
+                log.info("  ... and %d more", len(rows) - 5)
+            return EXIT_OK
+
+        client = connect_clickhouse()
+        ensure_schema(client, recreate=reset_schema)
+        fresh, duplicates = drop_duplicates(client, rows)
+        log.info("Dedup: %d new, %d duplicates skipped", len(fresh), duplicates)
+        inserted = insert_rows(client, fresh)
+        report_table_state(client)
+        log.info(
+            "Done: %d row(s) inserted, %d duplicate(s) skipped", inserted, duplicates
+        )
+        return EXIT_OK
+
+    except RuntimeError as exc:
+        log.error("%s", exc)
+        return EXIT_RUNTIME
+    except Exception:
+        log.exception("Unexpected failure during ingest")
+        return EXIT_RUNTIME
+    finally:
+        if client is not None:
+            client.close()
+            log.debug("ClickHouse connection closed")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -592,67 +793,47 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.limit < 1:
         log.error("--limit must be >= 1 (got %d)", args.limit)
-        return 2
+        return EXIT_USAGE
     if not str(args.threat_type).strip():
         log.error("--threat-type must not be empty (use 'all' to disable filtering)")
-        return 2
+        return EXIT_USAGE
+    if args.interval and args.interval < MIN_POLL_INTERVAL_SECONDS:
+        log.error(
+            "--interval must be >= %d seconds to respect URLhaus rate limits (got %d)",
+            MIN_POLL_INTERVAL_SECONDS,
+            args.interval,
+        )
+        return EXIT_USAGE
+    if args.interval and args.dry_run:
+        log.error("--interval and --dry-run cannot be combined")
+        return EXIT_USAGE
 
     load_environment()
-
-    client = None
     try:
-        records = fetch_recent_urls()
-        log_threat_breakdown(records, args.threat_type)
-        rows = map_records(
-            records,
-            args.limit,
-            threat_type=args.threat_type,
-            resolve_dns=args.resolve_dns,
-        )
-
-        if not rows and records and args.threat_type == DEFAULT_THREAT_TYPE:
-            log.error(
-                "Mapped 0/%d records although the feed returned data -- every "
-                "record failed validation. This is the signature of a "
-                "`date_added` format mismatch; refusing to report success.",
-                len(records),
-            )
-            return 3
-
-        if args.dry_run:
-            log.info("Dry run: %d row(s) mapped, database untouched", len(rows))
-            for row in rows[:5]:
-                log.info("  %s", row)
-            if len(rows) > 5:
-                log.info("  ... and %d more", len(rows) - 5)
-            return 0
-
-        client = connect_clickhouse()
-        ensure_schema(client, recreate=args.recreate)
-        fresh, duplicates = drop_duplicates(client, rows)
-        if duplicates:
-            log.info(
-                "Skipped %d duplicate row(s) already present in %s",
-                duplicates,
-                TABLE_NAME,
-            )
-        inserted = insert_rows(client, fresh)
-        report_table_state(client)
-        log.info(
-            "Done: %d row(s) inserted, %d duplicate(s) skipped", inserted, duplicates
-        )
-        return 0
-
+        table_name()
     except RuntimeError as exc:
         log.error("%s", exc)
-        return 1
-    except Exception:
-        log.exception("Unexpected failure during ingest")
-        return 1
-    finally:
-        if client is not None:
-            client.close()
-            log.debug("ClickHouse connection closed")
+        return EXIT_USAGE
+
+    if not args.interval:
+        return run_once(args, reset_schema=args.reset_schema)
+
+    # Polling mode: transient failures (HTTP 429, network) are logged and the
+    # loop continues; a parser regression (exit 3) stops it loudly.
+    log.info("Polling every %d s (Ctrl-C to stop)", args.interval)
+    reset = args.reset_schema
+    try:
+        while True:
+            code = run_once(args, reset_schema=reset)
+            reset = False  # never drop the table more than once
+            if code == EXIT_NOTHING_MAPPED:
+                return code
+            if code != EXIT_OK:
+                log.warning("Poll failed (exit %d); retrying next interval", code)
+            time.sleep(args.interval)
+    except KeyboardInterrupt:
+        log.info("Polling stopped by user")
+        return EXIT_OK
 
 
 if __name__ == "__main__":
