@@ -173,8 +173,12 @@ def test_dashboard_reruns_are_read_only(tmp_path, monkeypatch):
     app = AppTest.from_file(str(Path(__file__).parent.parent / "dashboard.py"), default_timeout=20).run()
     assert not app.exception
     assert any("Simulated data" in item.value for item in app.warning)
-    app.selectbox[0].select("demo-102").run()
+    assert not app.selectbox
+    app.session_state["selected_event"] = "demo-102"
+    app.run()
     assert not app.exception
+    assert app.session_state["threat_queue"]["selection"]["rows"] == [2]
+    assert any("No rule matched" in str(item.proto) for item in app.get("html"))
     app.run()
     assert not app.exception
     fake_dispatch.assert_not_called()
