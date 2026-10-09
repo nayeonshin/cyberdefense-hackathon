@@ -7,3 +7,35 @@ ledger/
 state.json
 STOP
 actor/bench/latest.json
+# --- Secrets ---------------------------------------------------------------
+# clickhouse.env holds the ClickHouse password; .roo/mcp.json duplicates it.
+# Both stay out of git. Keep a *.env.example with placeholder values instead.
+*.env
+!*.env.example
+.roo/
+mcp.json
+
+# --- Python ----------------------------------------------------------------
+*.py[cod]
+*$py.class
+venv/
+env/
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# --- Tooling / editors -----------------------------------------------------
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.DS_Store
+.idea/
+.vscode/
+
+# --- Runtime artifacts -----------------------------------------------------
+*.log
+logs/
