@@ -41,9 +41,11 @@ An interrupted raw-status mutation is reconciled on the next poll. Run one
 worker per database; parallel workers require an external claim/lease mechanism.
 The ingest poller should also have only one writer per database.
 
-`CLICKHOUSE_DATABASE` selects the database namespace. `THREATS_TABLE` and
-`EVENTS_TABLE` select validated table names for isolated development/tests;
-their defaults are `incoming_threats` and `events`. URLhaus/OpenPhish/ThreatFox feed rows
+`CLICKHOUSE_DATABASE` selects the database namespace. `THREATS_TABLE` (raw feed
+rows, default `incoming_threats`) and `VERDICTS_TABLE` (shared-contract verdicts,
+default `events`) select validated table names for isolated development/tests.
+`VERDICTS_TABLE` is the same variable the Actor reads. The Actor uses
+`EVENTS_TABLE` for the raw feed table, so the Brain deliberately does not read it. URLhaus/OpenPhish/ThreatFox feed rows
 set the independent-feed flag; synthetic demo rows use `feed_source: demo` and
 receive no feed confidence bonus.
 

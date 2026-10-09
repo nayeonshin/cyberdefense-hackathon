@@ -29,7 +29,7 @@ def database(monkeypatch):
     admin.command(f"CREATE DATABASE {name}")
     client = clickhouse_connect.get_client(database=name, **options)
     monkeypatch.setenv("THREATS_TABLE", "incoming_threats")
-    monkeypatch.setenv("EVENTS_TABLE", "events")
+    monkeypatch.setenv("VERDICTS_TABLE", "events")
     monkeypatch.setenv("CLICKHOUSE_DATABASE", name)
     # Member 1's public interface opens its own short-lived connection.
     monkeypatch.setattr(threatfeed, "_client", lambda: clickhouse_connect.get_client(database=name, **options))

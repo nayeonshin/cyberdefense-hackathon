@@ -39,7 +39,9 @@ PENDING_WHERE = """
 
 
 def events_table_name():
-    return table_name(os.getenv("EVENTS_TABLE", "events"))
+    # VERDICTS_TABLE matches actor/intake.py. Not EVENTS_TABLE: the Actor uses that
+    # name for the raw feed table.
+    return table_name(os.getenv("VERDICTS_TABLE", "events"))
 
 
 def ensure_events_schema(client) -> None:
