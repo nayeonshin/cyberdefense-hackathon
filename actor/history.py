@@ -151,6 +151,7 @@ def replay(limit: int = 0) -> None:
 
 
 _client = None
+_recent = {}        # host -> (time, result): one dispatch asks twice within a moment
 
 
 def lookup(host: str):
@@ -163,7 +164,12 @@ def lookup(host: str):
             _client = clickhouse_client()
         if _client is None:
             return None
-        found = host_history(_client, host)
+        cached = _recent.get(host)
+        if cached and time.monotonic() - cached[0] < 60:
+            found = cached[1]
+        else:
+            found = host_history(_client, host)
+            _recent[host] = (time.monotonic(), found)
         return found if found["urls_on_record"] else None
     except Exception:
         return None

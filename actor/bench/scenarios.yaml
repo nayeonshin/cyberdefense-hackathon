@@ -829,3 +829,33 @@
   title: A subdomain-style IPFS gateway address is covered as well
   verdict: {target_url: "https://bafybeigdyrexamplehash.ipfs.dweb.link/"}
   expect: url_only
+
+# ---------------------------------------------------------------- history query as a trigger
+# `history:` is what the ClickHouse lookup returns for the host in that scenario.
+- id: history-corroborates
+  group: act
+  title: A host with 12 malicious URLs already on record needs no other second source
+  verdict: {corroborated: false}
+  history: {urls_on_record: 12}
+  expect: full
+
+- id: history-too-thin
+  group: withhold
+  title: Two URLs on record are not enough to mail a host on their own
+  verdict: {corroborated: false}
+  history: {urls_on_record: 2}
+  expect: report
+
+- id: history-below-confidence
+  group: withhold
+  title: A long record does not replace the scanner's confidence
+  verdict: {corroborated: false, confidence_score: 0.92}
+  history: {urls_on_record: 500}
+  expect: report
+
+- id: history-on-platform
+  group: withhold
+  title: Thousands of URLs on record for a shared platform never lead to mailing it
+  verdict: {corroborated: false, target_url: "https://sites.google.com/view/history-on-platform"}
+  history: {urls_on_record: 12977}
+  expect: url_only

@@ -352,6 +352,11 @@ def run_scenario(sc: dict, mutant: dict = None) -> dict:
     env.update({k: str(v) for k, v in (sc.get("env") or {}).items()})
     ledger = Ledger(ledger_dir / "actions.jsonl", use_clickhouse=False)
 
+    record = None
+    if sc.get("history"):
+        record = dict({"urls_on_record": 0, "first_seen": "", "last_seen": "", "sources": "bench"},
+                      **sc["history"])
+
     def fake_enrich(host, offline=False):
         return _enrichment(profile, host)
 
@@ -365,6 +370,7 @@ def run_scenario(sc: dict, mutant: dict = None) -> dict:
             ("socket.create_connection", wire.escape), ("socket.getaddrinfo", wire.escape),
             ("actor.dispatch.enrich", fake_enrich), ("actor.recheck.enrich", fake_enrich),
             ("actor.recheck.resolve", lambda host: ["203.0.113.7"] if wire.up else []),
+            ("actor.history.lookup", lambda host: record),
         ]:
             stack.enter_context(mock.patch(target, replacement))
         try:
@@ -537,6 +543,8 @@ def _mutants() -> list:
         {"name": "rate limit removed",
          "policy": lambda p: p.__setitem__("rate_limit_per_recipient_per_hour", 10 ** 6)},
         {"name": "one failed check counts as takedown", "policy": confirm_one},
+        {"name": "one URL on record counts as confirmation",
+         "policy": lambda p: p["history"].__setitem__("corroborates_at", 1)},
         {"name": "second source no longer required",
          "verdict": lambda v: v.__setitem__("corroborated", True)},
         {"name": "simulated flag ignored", "verdict": lambda v: v.pop("simulated", None)},

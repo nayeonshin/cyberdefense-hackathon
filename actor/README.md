@@ -2,7 +2,7 @@
 
 ![Actor bench drawing sheet: verdict stamp, scenario matrix, acceptance table and revision history](bench/scorecard.svg)
 
-The sheet is redrawn by `python -m actor.bench`. It runs 113 labelled scenarios through the
+The sheet is redrawn by `python -m actor.bench`. It runs 117 labelled scenarios through the
 real dispatcher with every outside channel replaced by a recorder.
 
 - **View A** shows every scenario against every action: a filled square was sent as required,
@@ -70,10 +70,17 @@ What the real data changed:
 
 Both findings became bench scenarios first, then fixes.
 
-The same table feeds the reports. With `HISTORY_LOOKUP=1` every evidence bundle, incident
-page and abuse mail states what is already on record for the host, for example
-"1023 malicious URLs on record for this host (phishing-database)". The lookup runs on the
-table's sort key: 66 ms median from a laptop over 822,439 rows.
+The same table drives what the Actor does. With `HISTORY_LOOKUP=1` one query per verdict
+asks ClickHouse what is already on record for the host, and the answer is used twice:
+
+- **As a trigger.** A host with at least three malicious URLs on record counts as the
+  independent second source, so the Actor notifies the hosting provider without waiting
+  for a feed listing. The threshold is `history.corroborates_at` in `policy.yaml`. It never
+  overrides the scanner's confidence and never applies to allowlisted platforms.
+- **As evidence.** The bundle, the incident page and the abuse mail state the record, for
+  example "1023 malicious URLs on record for this host (phishing-database)".
+
+The lookup runs on the table's sort key: 66 ms median from a laptop over 822,439 rows.
 
 ## Live checks
 

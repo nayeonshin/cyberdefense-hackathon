@@ -7,6 +7,11 @@ thresholds:
 
 rate_limit_per_recipient_per_hour: 5
 
+# The ClickHouse history table as a second source: a host with at least this many
+# malicious URLs already on record counts as independently confirmed.
+history:
+  corroborates_at: 3
+
 recheck:
   escalate_after_seconds: 600   # rung 3: tell the registrar if the target is still up
   confirm_failures: 2           # rung 4: consecutive failed checks before "confirmed down"

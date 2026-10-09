@@ -86,6 +86,11 @@ def dispatch(verdict, live: bool = False, offline: bool = False,
     policy = policy or policy_module.load()
     controlled = policy_module.is_controlled(verdict, policy)
     enrichment = enrich(verdict.host, offline=offline or controlled)
+    # A query on the history table can stand in for the second source: enough malicious
+    # URLs already on record for this host and the Actor may notify the hosting provider.
+    record = None if controlled else history.lookup(verdict.host)
+    if record and record["urls_on_record"] >= policy["history"]["corroborates_at"]:
+        verdict.corroborated = True
     done = ledger.done_actions(verdict.host) if live else frozenset()
     decision = policy_module.decide(verdict, enrichment, policy, done)
 
