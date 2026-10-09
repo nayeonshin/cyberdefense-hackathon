@@ -39,3 +39,11 @@ htmlcov/
 # --- Runtime artifacts -----------------------------------------------------
 *.log
 logs/
+captures/
+node_modules/
+guild.json
+.guild/
+agent.js.gz
+tsconfig.tsbuildinfo
+.claude/
+.mcp.json

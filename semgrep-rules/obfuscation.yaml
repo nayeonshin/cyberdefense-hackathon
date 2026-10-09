@@ -1,0 +1,49 @@
+rules:
+  - id: decoded-credential-request
+    languages: [javascript]
+    severity: ERROR
+    message: A decoded destination receives a password through fetch or a hidden fetch alias
+    metadata:
+      threat_category: credential_harvester
+      weight: "0.6"
+    patterns:
+      - pattern-either:
+          - pattern-inside: |
+              var $URL = atob(...);
+              ...
+          - pattern-inside: |
+              var $URL = window.atob(...);
+              ...
+          - pattern-inside: |
+              var $URL = window["at" + "ob"](...);
+              ...
+      - pattern-either:
+          - pattern: 'fetch($URL, {..., body: $BODY, ...})'
+          - pattern: 'window["fe" + "tch"]($URL, {..., body: $BODY, ...})'
+          - patterns:
+              - pattern-inside: |
+                  var $SEND = window["fe" + "tch"];
+                  ...
+              - pattern: '$SEND($URL, {..., body: $BODY, ...})'
+      - metavariable-pattern:
+          metavariable: $BODY
+          patterns:
+            - pattern-either:
+                - pattern: document.querySelector("$SELECTOR").value
+                - pattern: document.getElementById("$SELECTOR").value
+            - metavariable-regex:
+                metavariable: $SELECTOR
+                regex: (?i).*\b(password|passwd|pwd|pass)\b
+
+  - id: escaped-remote-script
+    languages: [javascript]
+    severity: WARNING
+    message: Percent-encoded markup injects a remote script into the document
+    metadata:
+      threat_category: obfuscated_loader
+      weight: "0.4"
+    patterns:
+      - pattern: document.write(unescape("$MARKUP"))
+      - metavariable-regex:
+          metavariable: $MARKUP
+          regex: (?i)^%3cscript(?:%20|\s)[^\r\n]*?src(?:%3d|=)(?:%27|%22|['"])https?(?:%3a|:)(?:%2f|/){2}
