@@ -21,7 +21,7 @@ def execute(ctx: Context) -> Outcome:
               f"evidence sha256 {ctx.sha}")[:1000]
     response = requests.post(
         config.get("NETCRAFT_REPORT_URL", DEFAULT_ENDPOINT), timeout=20,
-        json={"email": email, "reason": reason, "urls": [{"url": ctx.verdict.target_url}]})
+        json={"email": email, "urls": [{"url": ctx.verdict.target_url, "reason": reason}]})
     if response.status_code != 200:
         return Outcome("FAILED", detail=f"HTTP {response.status_code}: {response.text[:200]}")
     uuid = response.json().get("uuid", "")
