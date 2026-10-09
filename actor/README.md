@@ -2,7 +2,7 @@
 
 ![Actor bench scorecard](bench/scorecard.svg)
 
-The card above is rewritten by `python -m actor.bench`: 81 labelled scenarios run through the
+The card above is rewritten by `python -m actor.bench`: 99 labelled scenarios run through the
 real dispatcher with every outside channel replaced by a recorder. One safety violation makes
 a run UNSAFE whatever its score. Details are in [bench/scenarios.yaml](bench/scenarios.yaml)
 and `bench/scorecard.html`.
@@ -33,6 +33,27 @@ Needs `requests`, `pyyaml` and `clickhouse-connect`. Copy `.env.example` to `.en
 
 Nothing is sent without `--live`, and each outside channel also needs its own `LIVE_*=1`.
 A file named `STOP` in the repo root halts every action.
+
+## The whole pipeline in one command
+
+`actor/intake.py` joins the three stages: it reads `PENDING` rows from Member 1's
+`incoming_threats`, asks Member 2's brain for a verdict (over HTTP when `BRAIN_URL` is set,
+otherwise in process), runs the ladder for `VERIFIED` rows and writes the outcome back.
+
+```bash
+python -m actor.intake --live --loop                             # against ClickHouse
+python -m actor.intake --rows fixtures/pipeline_rows.json --live # without a database
+```
+
+Row status after a pass: `REPORTED` (something went out), `SCANNED` (nothing to do),
+`TAKEN_DOWN` (two failed checks confirmed it). Rows stay `PENDING` when the brain is down or
+answers for the wrong event. Verdicts are stored in a `verdicts` table next to `actions`.
+A listing on URLhaus counts as the independent second source the Actor needs before it mails
+a host.
+
+Local run with the real scanner: `SEMGREP_BIN` pointing at Semgrep, `BRAIN_ALLOW_PRIVATE=1`,
+and `SITE_DIR=demo-sites/phish python -m actor.mock_registrar_server` serving Member 2's demo
+page as the controlled target.
 
 ## For the other stages
 
