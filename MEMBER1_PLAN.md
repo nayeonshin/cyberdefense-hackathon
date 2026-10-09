@@ -14,16 +14,16 @@ This document is the working spec for Member 1. It separates:
 
 ## 1. Status snapshot
 
-Phase 1 (ingest) is complete and verified against the **live** URLhaus API on 2026-10-09.
+**All four brief deliverables are done** and verified against the **live** URLhaus API on 2026-10-09 (Phases 1–3).
 
 | # | Brief requirement | State |
 |---|---|---|
-| 1 | ClickHouse instance (local Docker or Cloud) | **[DONE]** container `threat-orchestrator-db`, server version `26.9.14.10`, HTTP on `localhost:8123` (A1). Connection is env-driven (`CLICKHOUSE_HOST/PORT/USER/PASSWORD`), so swapping to ClickHouse Cloud is a config change, not a code change. |
-| 2 | Python ingestion script polling live threat feeds | **[DONE]** `ingest.py` polls the live authenticated `/v1/urls/recent/` endpoint: A2 maps `50/50`, A3 inserts 50 rows into an empty table. |
-| 3 | Schema: `timestamp, target_url, domain, ip_address, threat_type, takedown_status` | **[DONE]** all six brief columns present (A4); `timestamp` is `DateTime`, `takedown_status` is `String`. Rebuilt via DROP + recreate. |
-| 4 | Expose `get_pending_targets()` to Member 2 | **[PHASE 2]** `threatfeed.py` not implemented yet. |
+| 1 | ClickHouse instance (local Docker or Cloud) | **[DONE]** container `threat-orchestrator-db`, server version `26.9.14.10`, timezone `UTC`, HTTP on `localhost:8123` (A1). Connection is env-driven, so ClickHouse Cloud is a config change (§2.1). |
+| 2 | Python ingestion script polling live threat feeds | **[DONE]** `ingest.py` polls the live authenticated `/v1/urls/recent/` endpoint (one-shot, or `--interval ≥300`): A2 maps `50/50`, A3 inserts 50 rows. |
+| 3 | Schema: `timestamp, target_url, domain, ip_address, threat_type, takedown_status` | **[DONE]** all six brief columns present (A4); `timestamp` is `DateTime`. Rebuilt via `ingest.py --reset-schema`. |
+| 4 | Expose `get_pending_targets()` to Member 2 | **[DONE]** `threatfeed.py` (`get_pending_targets`, `update_takedown_status`), contract in `INTERFACE.md`, A5/A7 pass live and in `tests/smoke_test.py` (70/70). |
 
-Verified today: the container is up and authenticated (`SELECT version()` -> `26.9.14.10`), the Auth-Key in `clickhouse.env` is accepted by the live API (`query_status: ok`, 1000 records), the timestamp parser handles the live `date_added` format (8/8 self-checks), 50 rows insert into a fresh table, and a second back-to-back run inserts **0** rows (dedup by `event_id`).
+Optional extras from the brief (CT logs, simulated phishing list) are **not** implemented — see §8 step 7.
 
 ---
 
@@ -33,10 +33,10 @@ The brief assumes URLhaus is an open API. It is not anymore, since **2025-06-30*
 without a key the endpoint returns 401, and with an invalid key 403. Reference:
 <https://abuse.ch/blog/community-first/>
 
-**Status: resolved.** `URLHAUS_AUTH_KEY` is now present in `clickhouse.env`
-(gitignored, 48-char key). Measured live on 2026-10-09: HTTP 200,
-`query_status: "ok"`, 1000 records returned. `ingest.py` reads it from the
-environment and never logs it.
+**Status: resolved.** `URLHAUS_AUTH_KEY` is present in `clickhouse.env`
+(gitignored). Measured live on 2026-10-09: HTTP 200, `query_status: "ok"`,
+1000 records returned. `ingest.py` and `check_setup.py` read it from the
+environment and never log it.
 
 **Action item:** the key is a personal credential that will be in the same
 gitignored file when the hackathon ends — **rotate or revoke it at
@@ -85,49 +85,50 @@ These were open when this plan was drafted. They are now closed; the implementat
 
 ---
 
-## 4. [AGENT] Bugs and gaps found while planning
+## 4. Bugs and gaps found while planning — all FIXED
 
-### 4.1 High severity — the timestamp parser rejected 100% of live rows — **FIXED, and the theory was CONFIRMED**
+### 4.1 High severity — the timestamp parser rejected 100% of live rows — **FIXED; the ` UTC` theory was CONFIRMED**
 
-The suspicion was that `/v1/urls/recent/` emits a trailing zone marker. **Measured live on 2026-10-09: it does.**
+Measured live payload (2026-10-09, `GET /v1/urls/recent/`, HTTP 200):
 
-```json
-"date_added": "2026-10-09 18:55:15 UTC"
-```
+- top-level keys: `query_status`, `urls` (1000 records)
+- record keys: `blacklists, date_added, host, id, larted, reporter, tags, threat, url, url_status, urlhaus_reference`
+- record 0: `date_added = '2026-10-09 18:59:08 UTC'`, `host = 'www.tmcksa.com'`, `threat = 'malware_download'`, `url_status = 'online'`
+- **1000 / 1000** `date_added` values end in ` UTC`; 828 / 1000 `host`s are IP literals; no `host` carried a port.
 
-All **1000 / 1000** records in the polled window carried the ` UTC` suffix. The old
-`URLHAUS_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"` could not parse it, so `parse_timestamp()`
-returned `None` for every record, `map_records()` skipped them all, and `main()`
-still exited **0** while logging `Mapped 0/N` — a total failure that looked like success.
+The old `"%Y-%m-%d %H:%M:%S"` could not parse that, so every record was skipped and
+`main()` still exited **0** while logging `Mapped 0/N` — a total failure that looked like success.
 
-**Fixed:** `parse_timestamp()` now tolerates a trailing ` UTC` (case-insensitive), a bare
-form, ISO-8601 with a `T` separator, a trailing `Z`, and a numeric offset; the result is
-always UTC-aware (`datetime.fromisoformat`/`strptime` + `replace(tzinfo=timezone.utc)`).
-Verified by `ingest.py --self-test` (8/8, covering both documented formats plus ISO-8601
-and the four reject cases).
+**Fixed:** `parse_timestamp()` accepts the bare form, a trailing ` UTC`, ISO-8601 with `T`,
+a trailing `Z`, and numeric offsets; always returns a UTC-aware datetime; returns `None`
+for garbage. Covered by `ingest.py --self-test` (8/8) and `tests/smoke_test.py`.
 
-**Second guard added:** `main()` now refuses to report success on the silent-failure
-signature. If the feed returned data, the filter is `all`, and *nothing* maps, it logs an
-explicit error naming a `date_added` format mismatch and exits **3** instead of 0.
+**Fail-loud guard:** if records matching the `--threat-type` filter came back and *none* map,
+`ingest.py` logs an explicit error and exits **3**. A filter that legitimately matches nothing
+(e.g. `phishing` today) logs a warning and exits 0. Verified by the smoke test (bogus feed → exit 3).
 
-### 4.2 Column set does not match the brief
+### 4.2 Column set did not match the brief — **FIXED**
 
-Current (`ingest.py:53`): `event_id, target_url, timestamp, threat_type, action_status`
-Required: `timestamp, target_url, domain, ip_address, threat_type, takedown_status`
+Old: `event_id, target_url, timestamp, threat_type, action_status`.
+Now the §5 column set; `action_status` is renamed to `takedown_status` everywhere.
+`ingest.py --reset-schema` (alias `--recreate`) drops and recreates the table; without it a
+mismatched table is refused with a clear `RuntimeError` instead of `CREATE IF NOT EXISTS`
+silently keeping the old shape.
 
-`incoming_threats` is **currently empty**, so this is a clean `DROP` + recreate, not a migration.
+### 4.3 No deduplication — **FIXED**
 
-### 4.3 No deduplication
+`drop_duplicates()` runs one parameterized `SELECT … WHERE event_id IN {ids:Array(String)}`
+and also collapses repeats inside a batch. Logged as `Dedup: N new, M duplicates skipped`.
 
-`urls/recent/` is a sliding window. Polling twice re-inserts overlapping URLs, so "top 5 unscanned domains" inflates with duplicates and row counts stop meaning anything. `event_id` (URLhaus `id`) is stable and is the natural dedup key.
+### 4.4 `domain` derivation rule — **FIXED**
 
-### 4.4 `domain` needs a defined derivation rule
-
-Grouping by domain is the core of the "top 5 unscanned domains" query, so the rule must be pinned down or the grouping silently splits. Proposal: prefer the API's `host` field; fall back to `urllib.parse.urlsplit(target_url).hostname`; lowercase it; **keep** a literal IP as its own value; strip the port.
+Prefer the API's `host`; fall back to `urlsplit(target_url).hostname`; lowercase; strip the
+port and trailing dot; keep IP literals as-is. If neither yields a host the row is skipped
+with a warning — `domain` is never stored empty.
 
 ---
 
-## 5. [AGENT] Proposed schema (pending D1–D5)
+## 5. Schema (implemented)
 
 ```sql
 CREATE TABLE IF NOT EXISTS incoming_threats
@@ -152,85 +153,89 @@ ORDER BY `timestamp`
 
 ---
 
-## 6. [AGENT] The interface Member 2 depends on
+## 6. The interface Member 2 depends on (implemented in `threatfeed.py`)
 
-Full contract in `INTERFACE.md`. Shape:
+Full contract in `INTERFACE.md`, which is authoritative. Shape:
 
 ```python
 get_pending_targets(limit: int = 5) -> list[dict]
-# -> [{"domain": str, "url_count": int, "first_seen": datetime, "last_seen": datetime}, ...]
+# -> [{"domain", "url_count", "first_seen", "last_seen",          # contract keys
+#      "target_urls", "threat_types", "ip_address"}, ...]        # additive keys
 
-update_takedown_status(domain: str | None = None,
-                       event_id: str | None = None,
-                       status: str = "SCANNED") -> int
+update_takedown_status(status: str, *, domain: str | None = None,
+                       event_id: str | None = None) -> int
 ```
 
-Backing query for "top 5 unscanned domains":
+Backing query (simplified; all caller values are bound parameters):
 
 ```sql
 SELECT domain,
-       count()            AS url_count,
-       min(`timestamp`)   AS first_seen,
-       max(`timestamp`)   AS last_seen
+       uniqExact(target_url) AS url_count,
+       min(`timestamp`)      AS first_seen,
+       max(`timestamp`)      AS last_seen,
+       arraySlice(... groupArray((`timestamp`, target_url)) newest first ..., 1, 10) AS target_urls,
+       arraySort(groupUniqArray(threat_type)) AS threat_types,
+       anyIf(ip_address, ip_address != '')    AS ip_address
 FROM incoming_threats
-WHERE takedown_status = 'PENDING'
+WHERE takedown_status = {pending:String}
 GROUP BY domain
 ORDER BY url_count DESC, last_seen DESC
-LIMIT {limit}
+LIMIT {limit:UInt32}
 ```
+
+Write-back: count matches, then
+`ALTER TABLE incoming_threats UPDATE takedown_status = {status:String} WHERE domain = {selector:String}`
+with `settings={"mutations_sync": 1}` (D5).
 
 `ORDER BY url_count DESC` is what makes it a *high-velocity* view: the domain with the most freshly reported URLs is the most active campaign, and the best takedown candidate.
 
 ---
 
-## 7. [YOU] Acceptance criteria — what you must verify yourself
-
-I can build these, but you own the sign-off. Run each and confirm.
+## 7. Acceptance criteria
 
 | # | Check | Command | Expected |
 |---|---|---|---|
-| A1 | DB reachable | `curl -s -u default:hackathon123 "http://localhost:8123/?query=SELECT+version()"` | `26.9.14.10` |
+| A1 | DB reachable | `curl -s -u "default:$CLICKHOUSE_PASSWORD" "http://localhost:8123/?query=SELECT+version()"` | `26.9.14.10` |
 | A2 | Key works, mapping works, DB untouched | `.venv/bin/python ingest.py --dry-run` | logs `Mapped N/N records`, prints sample rows, no writes |
 | A3 | Real insert | `.venv/bin/python ingest.py` | logs `Insert completed`, then a verification row count > 0 |
-| A4 | Schema matches brief exactly | `curl -s --data-binary "DESCRIBE TABLE incoming_threats" "http://localhost:8123/" -u default:hackathon123` | the 6 required columns present, `timestamp` is `DateTime` |
-| A5 | Interface works for Member 2 | `.venv/bin/python -c "from threatfeed import get_pending_targets; [print(r) for r in get_pending_targets(5)]"` | 5 rows, all `PENDING`-backed, ordered by `url_count` desc |
-| A6 | Dedup holds | run `ingest.py` twice back-to-back, then check `count()` | second run adds ~0 new rows when the feed window has not moved |
-| A7 | Status write-back is visible | call `update_takedown_status(status='TAKEN_DOWN')` for one domain, re-run A5 | that domain is gone from the pending list |
+| A4 | Schema matches brief exactly | `curl -s --data-binary "DESCRIBE TABLE incoming_threats" "http://localhost:8123/" -u "default:$CLICKHOUSE_PASSWORD"` | the 6 required columns present, `timestamp` is `DateTime` |
+| A5 | Interface works for Member 2 | `.venv/bin/python threatfeed.py` | 5 rows, all `PENDING`-backed, ordered by `url_count` desc |
+| A6 | Dedup holds | run `ingest.py` twice back-to-back | second run: `Dedup: 0 new, M duplicates skipped` |
+| A7 | Status write-back is visible | `.venv/bin/python tests/smoke_test.py` (and live: `update_takedown_status("TAKEN_DOWN", domain=X)`, re-run A5) | X gone from the pending list immediately |
 
-**Phase 1 result (measured 2026-10-09 against the live API, raw output in the completion report):**
+**Result (measured 2026-10-09 against the live API):**
 
 | # | Result |
 |---|---|
-| A1 | **PASS** — `SELECT version()` -> `26.9.14.10` |
-| A2 | **PASS** — `Mapped 50/50 records for insertion`, 5 sample rows printed, DB untouched |
-| A3 | **PASS** — `Insert completed`; `count()` -> 50 on a fresh table |
-| A4 | **PASS** — all six brief columns present; `timestamp` is `DateTime`; `takedown_status` is `String` |
-| A5 | **Deferred to Phase 2** — needs `threatfeed.py` |
-| A6 | **PASS** — second back-to-back run: `Done: 0 row(s) inserted, 50 duplicate(s) skipped` |
-| A7 | **Deferred to Phase 2** — needs `update_takedown_status()` |
+| A1 | **PASS** — `26.9.14.10` |
+| A2 | **PASS** — `URLhaus returned 1000 records`, `malware_download=1000`, `Mapped 50/50 records for insertion`, DB untouched |
+| A3 | **PASS** — `--reset-schema` run: `Dedup: 50 new, 0 duplicates skipped`, `Insert completed`, `holds 50 row(s), 50 PENDING` |
+| A4 | **PASS** — 9 columns incl. all six brief columns; `timestamp` is `DateTime` |
+| A5 | **PASS** — top 5 live: `tronzadorasnng.com` (7 URLs), `github.com` (3), `www.tmcksa.com` (2), `114.226.200.81` (2), `micstndasap.world` (2) |
+| A6 | **PASS** — second run: `Dedup: 0 new, 50 duplicates skipped`, `Done: 0 row(s) inserted` |
+| A7 | **PASS** — smoke test: `busy.example gone from pending IMMEDIATELY`; live: `update_takedown_status('TAKEN_DOWN', domain='tronzadorasnng.com') -> 7`, gone from the next call (then restored to `PENDING`) |
+| — | `tests/smoke_test.py`: **ALL CHECKS PASSED (70 checks)**; `check_setup.py`: **No blockers** |
+| — | `--threat-type phishing --dry-run`: **0** matches in 1000 records (feed was 100 % `malware_download`) |
 
-A2–A6 are no longer blocked: §2 is resolved.
-
-**Caveat on A6:** the measured churn of `urls/recent/` is tiny — over a 12-second
-window the top-50 `id`s were **identical** (overlap 50/50, `id` of record 0 unchanged
-at `3947111`). So the dedup check is meaningful, but a second run "adding 0 rows" also
-reflects a feed that had not moved at all, not only dedup blocking it. Dedup was
-exercised directly: run #1 skipped 49 duplicates and inserted the 1 genuinely new `id`.
+**Caveat on A6:** `urls/recent/` churns slowly (≈1 new `id` per few minutes), so "0 new"
+on an immediate re-run partly reflects an unmoved window. Dedup itself is proven
+independently by the smoke test (re-insert of 7 known rows → 0 added).
 
 ---
 
-## 8. [AGENT] Implementation order — Phase 1 status
+## 8. Implementation order — status
 
 | # | Step | State |
 |---|---|---|
-| 1 | Fix the `date_added` parser (4.1) and add a unit check over both formats | **[DONE]** `parse_timestamp()`; `.venv/bin/python ingest.py --self-test` -> 8/8 |
-| 2 | Drop and recreate `incoming_threats` with the §5 column set | **[DONE]** `ingest.py --recreate` |
-| 3 | Add `domain` / `ip_address` derivation (4.4, D3) | **[DONE]** `derive_domain()`, `derive_ip_address()`, `--resolve-dns` |
-| 4 | Add dedup by `event_id` (4.3) | **[DONE]** `drop_duplicates()` |
-| 5 | Add `threatfeed.py` with `get_pending_targets()` + `update_takedown_status()` (§6) | **[PHASE 2]** |
-| 6 | Extend `/tmp/verify_ingest.py` into a committed `tests/smoke_test.py` covering A4–A7 against synthetic rows, so it runs without the Auth-Key | **[PHASE 2]** (`ingest.py --self-test` is the Phase 1 placeholder) |
-| 7 | Optional: second feed (crt.sh CT log JSON, no auth required) behind `feed_source` | **[BACKLOG]** |
-| 8 | Commit to `feature/clickhouse-ingest` | **[ORCHESTRATOR]** — not committed by Member 1 |
+| 1 | Fix the `date_added` parser (4.1) + fail-loud exit 3 | **[DONE]** |
+| 2 | Drop and recreate `incoming_threats` with the §5 column set | **[DONE]** `ingest.py --reset-schema` |
+| 3 | `domain` / `ip_address` derivation (4.4, D3) | **[DONE]** `--resolve-dns` uses a 2 s timeout, never raises |
+| 4 | Dedup by `event_id` (4.3) | **[DONE]** |
+| 5 | `threatfeed.py` with `get_pending_targets()` + `update_takedown_status()` (§6) | **[DONE]** |
+| 6 | `tests/smoke_test.py` (replaces `/tmp/verify_ingest.py`), isolated table `incoming_threats_test` | **[DONE]** 70/70 |
+| 6a | Optional polling loop `--interval SECONDS` (≥300) | **[DONE]** |
+| 7 | Optional: second feed (crt.sh CT log / simulated phishing list) behind `feed_source` | **[BACKLOG]** not started |
+| 8 | Commit to `feature/clickhouse-ingest` | **[DONE]** local commits, not pushed |
 
 ---
 
@@ -240,9 +245,12 @@ exercised directly: run #1 skipped 49 duplicates and inserted the 1 genuinely ne
 |---|---|---|
 | ~~No Auth-Key~~ | ~~No live ingestion~~ | **[RESOLVED]** key present in `clickhouse.env`; rotate after the hackathon (§2) |
 | ~~`date_added` format differs from what the parser expects~~ | ~~Silent 0-row ingest~~ | **[RESOLVED, theory confirmed]** live format is `... UTC`; parser now tolerant, `--self-test` guards it, and `main()` exits 3 rather than 0 on the all-skipped signature |
-| URLhaus `urls/recent/` is a sliding window, not an event stream | Duplicates, inflated velocity counts | Dedup on `event_id` (4.3) — A6 |
+| URLhaus `urls/recent/` is a sliding window, not an event stream | Duplicates, inflated velocity counts | **[MITIGATED]** dedup on `event_id` (4.3) — A6 |
 | `urls/recent/` may return fewer than `--limit` records | Demo shows fewer rows than the brief implies | Logged: `URLhaus returned N records`; `Mapped N/M` makes the ratio explicit |
-| Rate limiting on the free tier | Poller breaks mid-demo | Poll on an interval, never in a loop; HTTP 429 raises explicitly |
-| ClickHouse mutation is async | Member 2 reports a status that is not visible yet | `mutations_sync=1` (D5) — Phase 2 |
-| The `urls/recent/` window is **all `malware_download`** at present (0 `phishing` in 1000 rows) | A `--threat-type phishing` demo would legitimately show 0 rows | Documented in §3 D2; `--threat-type` defaults to `all` so the demo has volume. Re-check the mix before a phishing-only demo. |
-| Table mismatch if the old 5-column table is still live | Inserts would fail against the brief's column set | `assert_schema()` refuses mismatched tables; `--recreate` rebuilds (the intended one-off path, since the table was empty) |
+| Rate limiting on the free tier | Poller breaks mid-demo | **[MITIGATED]** `--interval` enforces ≥300 s; HTTP 429 raises explicitly; in polling mode a failed poll is logged and retried next interval |
+| ClickHouse mutation is async | Member 2 reports a status that is not visible yet | **[RESOLVED]** `mutations_sync=1` (D5), proven by A7 |
+| The `urls/recent/` window is **all `malware_download`** (0 `phishing` in 1000 rows, re-measured at verification time) | A phishing-only demo shows 0 rows | `--threat-type` defaults to `all`. Re-check the mix before a phishing-only demo. |
+| Old 5-column table still live on a teammate's machine | Inserts fail against the new column set | `assert_schema()` refuses it with a clear error; run `ingest.py --reset-schema` once |
+| Auth-Key / password in `clickhouse.env` | Credential leak | Gitignored, never logged; **rotate the Auth-Key after the hackathon** |
+| `ip_address` mostly empty for hostname-based URLs | Member 2 lacks an IP | By design (D3); `--resolve-dns` opt-in, or resolve in Member 2 |
+| `get_pending_targets` keeps a domain pending if *any* of its rows is PENDING | A partially actioned domain reappears | Intended: aggregates cover PENDING rows only; mark by `domain=` to clear it fully |
