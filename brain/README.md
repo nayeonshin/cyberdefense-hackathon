@@ -139,12 +139,12 @@ the existing loader rule deliberately notices escaped document writes at 0.4.
 
 ## Guild agent
 
-[Verifier](../agents/verifier/README.md) builds locally using the existing Guild
-scaffold. Guild CLI login is valid; MCP is unavailable. Its default export reviews
-supplied scanner results and sources without tools. A separate workflow factory
-is ready for integration bindings, but no public scanner URL was supplied, so
-that workflow has not been uploaded or tested in Guild. Feed lookup, capture-text
-retrieval and event persistence still need real integration bindings.
+[Verifier](../agents/verifier/README.md) (`dotimothy~threat-verifier`) gives a
+second opinion on a scan result plus the captured scripts. Its review-only form
+builds and runs on Guild: it judged the `evasive` sample malicious and the
+`own-login` sample benign. The fuller workflow that calls `/scan`, checks feeds
+and writes events is written but cannot run until `/scan` has a stable public
+URL and those integrations exist.
 
 ## Verified HTTP demo
 

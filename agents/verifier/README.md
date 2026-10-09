@@ -10,14 +10,25 @@ result and optionally captured sources as JSON text, using `prompt.ts`. It has
 no tools, so it does not call `/scan`, check feeds or write events. Its review
 output is separate from the shared event contract.
 
-**Local build passed** with the CLI-created scaffold and installed Guild SDK 0.7.8.
-Guild CLI authentication is valid. Node and Guild were installed outside this
-PowerShell session's PATH; on this machine add `C:\Program Files\nodejs`,
-`C:\Program Files\Git\usr\bin` and `%APPDATA%\npm` before `npm run build`.
-The MCP connection remains unavailable (`resources/list` reports unknown server
-`guild`). No public scanner URL or four-operation integration binding was
-supplied, so the new workflow has not been tested end to end, uploaded or
-published by this run. Earlier Guild test artifacts do not validate this workflow.
+**Status.** The default export builds on Guild and was tested there in the
+`dotimothy~cyberhack` workspace with `guild agent test`. A draft version is saved
+on Guild and passed validation; it is not published:
+
+| Input | Scanner said | Verifier said |
+|---|---|---|
+| `../wrapped-evasive.json` (obfuscated credential theft) | REJECTED, 0.0 | malicious, 0.99; decoded the hidden collector URL |
+| `../wrapped-benign.json` (login posting to its own site) | REJECTED, 0.0 | benign, 0.95 |
+
+```sh
+guild agent test --workspace dotimothy~cyberhack --mode json < ../wrapped-evasive.json
+```
+
+Guild uploads only files tracked in this directory's own git repo, so `git add`
+any new source file here before testing or saving, or the server build cannot
+find it.
+
+The four-tool `createVerifier` workflow compiles but has not run: no public
+scanner URL or integration operations exist yet.
 
 Follow the repository's [agent-development skill](../../.claude/skills/agent-dev/SKILL.md)
 and [CLI workflow](../../.claude/skills/guild-cli-workflow/SKILL.md) to finish:
