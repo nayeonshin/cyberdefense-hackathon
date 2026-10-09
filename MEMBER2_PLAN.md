@@ -24,7 +24,7 @@ The slide-style summary is in [MEMBER2_PRESENTATION.md](MEMBER2_PRESENTATION.md)
 | 4 | Guild AI | **[DONE, partly]** Verifier agent built, tested on Guild and saved as a draft. Not yet wired into the automated path (§6). |
 | 5 | Comparison against a baseline | **[DONE]** `brain/evaluate.py`: rules against a regex baseline on 15 labelled samples. |
 | + | HTTP service | **[DONE]** `brain/service.py`: `POST /scan`, `POST /scan/batch` (1 to 25 events), `X-API-Key` auth. |
-| + | Autonomous worker | **[DONE, unverified live]** `brain/worker.py` reads Member 1's table and appends verdicts to `events` (§5). |
+| + | Autonomous worker | **[DONE, verified locally]** `brain/worker.py` reads Member 1's table and appends verdicts to `events` (§5). Not yet run against the shared database. |
 
 ---
 
@@ -65,7 +65,10 @@ Guild uploads only files tracked in the agent directory's own git repo. New sour
 ### 3.7 One variable named two tables — FIXED
 `EVENTS_TABLE` meant the verdict table in the Brain and the raw feed table in the Actor. The Brain now reads `VERDICTS_TABLE`.
 
-### 3.8 Every feed row gets the feed bonus — OPEN
+### 3.8 Scores lost precision in ClickHouse — FIXED
+`confidence_score` was a Float32 column, so 0.95 came back as 0.94999999 and would miss a `>= 0.95` threshold. Found by running the worker against a real ClickHouse. New tables use Float64; `migrate_events_schema()` runs at worker start, widens an older table and rounds its scores back to two decimals. Two round-trip tests cover it.
+
+### 3.9 Every feed row gets the feed bonus — OPEN
 `get_pending_events()` sets `listed_on_feed` for any row from URLhaus, OpenPhish or ThreatFox, so every scan gets +0.15. The bonus was meant for a second, independent source. See §8.
 
 ---
@@ -110,10 +113,10 @@ Member 3's `actor/intake.py` already uses the first two and acts on the third.
 | B6 | No benign sample reaches the threshold | **Pass.** 0 of 8. |
 | B7 | Service rejects requests without the API key when one is set | **Pass.** |
 | B8 | Verifier agent builds and runs on Guild | **Pass.** Two test runs; draft validated. |
-| B9 | Worker round trip against ClickHouse | **Not verified in the final state.** Passed on a local instance at the first integration commit; skipped since. |
+| B9 | Worker round trip against ClickHouse | **Pass, on a local instance** (ClickHouse 26.9.14.10 in Docker). All 8 database tests pass. A real `python -m brain.worker --once` took three pending rows to `VERIFIED` 0.95, `REJECTED` 0.0 and `FETCH_FAILED` in 4.3 s, marked them `SCANNED`, and a second run found nothing to do. Not run against the shared instance. |
 | B10 | Scan of a real feed URL | **Not run.** All runs used our own pages and samples. |
 
-Test suite: 53 passed, 6 skipped (the ClickHouse cases).
+Test suite: 61 passed with a local ClickHouse (49 s on Linux). Without a database: 53 passed, 8 skipped.
 
 ---
 
@@ -141,7 +144,7 @@ Test suite: 53 passed, 6 skipped (the ClickHouse cases).
 6. **[DONE]** Two obfuscation rules for the samples the first six missed.
 7. **[DONE]** Batch scanning.
 8. **[DONE]** Worker and verdict table against Member 1's schema.
-9. **[YOU]** Run the worker against the shared ClickHouse (`python -m brain.worker --once`, tests with `RUN_CLICKHOUSE_TESTS=1`).
+9. **[DONE locally]** Worker and database tests run against a local ClickHouse. **[YOU]** Repeat against the shared instance once the team has one (`python -m brain.worker --once`).
 10. **[BLOCKED]** Guild integration, pending a public `/scan` URL.
 
 ---
@@ -153,7 +156,8 @@ Test suite: 53 passed, 6 skipped (the ClickHouse cases).
 | Rules fitted to the samples | **Open.** The decoded-request rule matches literal `"fe" + "tch"` and `"at" + "ob"`. Three of six variations were missed. Detection numbers describe the samples, not real kits. |
 | Confidence scale does not line up with the Actor | **Open, needs a team decision.** Single-rule verdicts reach 0.6 to 0.75; the Actor acts from 0.80. They are detected but not actioned. |
 | Feed bonus applied to every row | **Open.** Either restrict it to URLhaus, as the Actor does for corroboration, or drop it for single-feed rows. |
-| Worker unverified against the shared database | **Open.** See B9. |
+| Worker unverified against the shared database | **Open.** Verified on a local instance only (B9). |
+| `confidence_score` was stored as Float32 | **Fixed.** 0.95 read back as 0.94999999, which fails a `>= 0.95` comparison such as the Actor's host-notification threshold. The column is now Float64, and the worker widens an existing Float32 table at start-up and restores its scores (§3.8). |
 | One worker per database | **Accepted.** Two workers would scan the same rows; the code documents this. |
 | Fetch failures are never retried | **Accepted.** They are marked scanned and left. |
 | Fetching live malicious content | **Mitigated.** Text only, never rendered; run in WSL or the container, not on a laptop's host OS. |

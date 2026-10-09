@@ -124,14 +124,15 @@ curl -X POST $BRAIN_URL/scan/batch -H "X-API-Key: $BRAIN_API_KEY" \
 - **Latency per URL, local pages:**
   - Linux: 3.5 s single; 0.5 s each in a batch of 25 (11.8 s total).
   - Windows: 22 s single. Run the scanner on Linux.
-- **Tests:** 53 passed, 6 skipped. The 6 skipped need a live ClickHouse.
+- **Tests:** 61 passed, including 8 round-trip tests against a local ClickHouse.
+- **Worker, real run on local ClickHouse:** 3 pending rows in, 3 verdict rows out in 4.3 s; a second run found nothing left to do.
 
 ---
 
 ## Limitations & Next Steps
 
 - **Not verified live:**
-  - The worker against the shared ClickHouse. Its database tests passed on a local instance earlier and were skipped in the final run.
+  - The worker against the team's shared ClickHouse. It is verified on a local instance only.
   - Real feed URLs. Everything above ran against our own demo pages and samples.
 - **Rules are narrow:** the two obfuscation rules were written for the samples they catch. Three of six variations we tried slipped past. The Verifier agent is the answer for those.
 - **Guild agent is not yet in the automated path:** it needs a public `/scan` URL to be registered as a Guild tool. The four-tool workflow is written but has not run.

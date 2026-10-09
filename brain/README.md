@@ -44,7 +44,8 @@ The ingest poller should also have only one writer per database.
 `CLICKHOUSE_DATABASE` selects the database namespace. `THREATS_TABLE` (raw feed
 rows, default `incoming_threats`) and `VERDICTS_TABLE` (shared-contract verdicts,
 default `events`) select validated table names for isolated development/tests.
-`VERDICTS_TABLE` is the same variable the Actor reads. The Actor uses
+`confidence_score` is stored as Float64 so that 0.95 reads back as 0.95; the worker widens
+an older Float32 table when it starts. `VERDICTS_TABLE` is the same variable the Actor reads. The Actor uses
 `EVENTS_TABLE` for the raw feed table, so the Brain deliberately does not read it. URLhaus/OpenPhish/ThreatFox feed rows
 set the independent-feed flag; synthetic demo rows use `feed_source: demo` and
 receive no feed confidence bonus.
