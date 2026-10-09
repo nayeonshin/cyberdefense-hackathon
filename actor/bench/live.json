@@ -1,0 +1,70 @@
+{
+ "ts": "2026-10-09T20:14:43.647Z",
+ "full": true,
+ "checks": [
+  {
+   "channel": "clickhouse write",
+   "provider": "ClickHouse",
+   "status": "OK",
+   "latency_ms": 22706,
+   "detail": "insert and count, 1 rows in live_checks",
+   "proof_url": ""
+  },
+  {
+   "channel": "clickhouse lookup",
+   "provider": "ClickHouse",
+   "status": "OK",
+   "latency_ms": 396,
+   "detail": "17 live receipts over 2 domains",
+   "proof_url": ""
+  },
+  {
+   "channel": "scanner",
+   "provider": "Semgrep",
+   "status": "OK",
+   "latency_ms": 11302,
+   "detail": "VERIFIED at 0.95, rules: cross-origin-credential-post, fake-login-form, telegram-bot-exfil",
+   "proof_url": ""
+  },
+  {
+   "channel": "urlscan",
+   "provider": "urlscan.io",
+   "status": "OK",
+   "latency_ms": 1136,
+   "detail": "key accepted, 1/5000 public scans used today; no CONTROLLED_URL to scan",
+   "proof_url": ""
+  },
+  {
+   "channel": "netcraft",
+   "provider": "Netcraft",
+   "status": "SKIP",
+   "latency_ms": 0,
+   "detail": "REPORTER_EMAIL not set",
+   "proof_url": ""
+  },
+  {
+   "channel": "feed",
+   "provider": "GitHub",
+   "status": "OK",
+   "latency_ms": 6641,
+   "detail": "self-test entry pushed, then resolved and removed from the blocklist",
+   "proof_url": "https://github.com/OutBlade/threat-feed/blob/main/incidents/selftest-201437.md"
+  },
+  {
+   "channel": "controlled target",
+   "provider": "Akash",
+   "status": "SKIP",
+   "latency_ms": 0,
+   "detail": "CONTROLLED_URL not set (the test page hosted on Akash)",
+   "proof_url": ""
+  },
+  {
+   "channel": "mail sink",
+   "provider": "local",
+   "status": "OK",
+   "latency_ms": 97,
+   "detail": "test mail delivered to the sink",
+   "proof_url": "http://localhost:8025"
+  }
+ ]
+}

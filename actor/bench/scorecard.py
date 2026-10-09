@@ -5,6 +5,7 @@ The verdict is the release stamp, the run history is the revision table, the sco
 is one field of the title block and its make-up is the acceptance table.
 """
 import base64
+import json
 from html import escape
 from pathlib import Path
 
@@ -378,6 +379,7 @@ summary{{font:400 12px 'Sheet',"Arial Narrow",sans-serif;letter-spacing:.08em;te
 cursor:pointer;padding:8px 0;border-top:1.1px solid var(--ink);border-bottom:.5px solid var(--rule);
 list-style-position:inside}}
 summary:hover{{color:var(--blue)}}
+a{{color:var(--blue);text-underline-offset:3px}}
 :focus-visible{{outline:2px solid var(--blue);outline-offset:2px}}
 .scroll{{overflow-x:auto}}
 p{{margin:8px 0 0;max-width:70ch}}
@@ -402,6 +404,28 @@ def _rows(scenarios: list) -> str:
         f"<td>{escape(s['title'])}</td><td>{_counts(s['expected'])}</td><td>{_counts(s['executed'])}</td>"
         f"<td class='{'bad' if s['problems'] else ''}'>{'<br>'.join(escape(p) for p in s['problems'][:4])}</td></tr>"
         for s in scenarios)
+
+
+def _live() -> str:
+    """The last live check of the real channels, when one has been run."""
+    path = HERE / "live.json"
+    if not path.exists():
+        return ""
+    record = json.loads(path.read_text(encoding="utf-8"))
+    rows = ""
+    for c in record["checks"]:
+        state = {"OK": "pass", "SKIP": "skipped"}.get(c["status"], "fail")
+        icon = _state("pass" if state == "pass" else "fail").replace(">pass<", ">ok<").replace(">fail<", f">{state}<")
+        if state == "skipped":
+            icon = '<span class="state muted">not run</span>'
+        proof = (f'<a href="{escape(c["proof_url"])}">receipt</a>' if c["proof_url"].startswith("http") else "")
+        rows += (f"<tr><td>{icon}</td><td class='id'>{escape(c['channel'])}</td>"
+                 f"<td>{escape(c['provider'])}</td><td class='n'>{c['latency_ms']} ms</td>"
+                 f"<td>{escape(c['detail'])}</td><td>{proof}</td></tr>")
+    mode = "full, including checks that leave a trace" if record["full"] else "read-only"
+    return (f'<h2>Live channels<small>checked {escape(record["ts"][11:16])} UTC, {mode}</small></h2>'
+            '<div class="scroll"><table><tr><th>State</th><th>Channel</th><th>Provider</th><th>Time</th>'
+            f"<th>Result</th><th>Proof</th></tr>{rows}</table></div>")
 
 
 def html(result: dict, history: list) -> str:
@@ -441,6 +465,7 @@ def html(result: dict, history: list) -> str:
 <h2>Nonconformances<small>sheet 2 of 2, {len(failing)} open</small></h2>{attention}
 {changed}
 {sabotage}
+{_live()}
 <details><summary>All {len(result['scenarios'])} scenarios</summary>
 <div class="scroll"><table>{head}{_rows(result['scenarios'])}</table></div></details>
 <details><summary>All {len(history)} revisions</summary><div class="scroll"><table>

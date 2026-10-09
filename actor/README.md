@@ -42,6 +42,21 @@ Needs `requests`, `pyyaml` and `clickhouse-connect`. Copy `.env.example` to `.en
 Nothing is sent without `--live`, and each outside channel also needs its own `LIVE_*=1`.
 A file named `STOP` in the repo root halts every action.
 
+## Live checks
+
+The bench proves the decisions with every channel replaced by a recorder. `actor/live.py`
+proves the channels themselves:
+
+```bash
+python -m actor.live          # read-only: credentials, reachability, latency
+python -m actor.live --full   # also pushes a self-test entry to the feed and removes it again
+```
+
+It checks ClickHouse (write and lookup), the Semgrep scanner on the demo page, urlscan.io,
+Netcraft's development endpoint, the public feed repository, the controlled target and the
+mail sink. Results land in `bench/live.json`, in the ClickHouse table `live_checks` and on
+sheet 2 of `bench/scorecard.html`.
+
 ## The whole pipeline in one command
 
 `actor/intake.py` joins the three stages: it reads `PENDING` rows from Member 1's
