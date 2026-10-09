@@ -11,12 +11,17 @@ All other fields pass through unchanged.
 ## Member 1 integration
 
 The ingestion implementation from `feature/clickhouse-ingest` is included at
-commit `2b6aafe`. Its public API and domain summaries are described in
+commit `1f80f6f`, including the OpenPhish/ThreatFox adapters, autonomous daemon,
+and run telemetry. Its public API and domain summaries are described in
 [INTERFACE.md](../INTERFACE.md). Use one app environment for both parts:
 
 ```sh
 python -m pip install -r requirements.txt
 # Fill in the gitignored clickhouse.env using clickhouse.env.example.
+python ingest.py --feeds all --limit 100
+# Autonomous ingestion, per-feed schedules and exponential backoff:
+python ingest.py --daemon --limit 100
+python threatfeed.py --stats
 python -m brain.worker --once
 python -m brain.worker --limit 25 --interval 10
 ```
@@ -38,9 +43,27 @@ The ingest poller should also have only one writer per database.
 
 `CLICKHOUSE_DATABASE` selects the database namespace. `THREATS_TABLE` and
 `EVENTS_TABLE` select validated table names for isolated development/tests;
-their defaults are `incoming_threats` and `events`. URLhaus/OpenPhish feed rows
+their defaults are `incoming_threats` and `events`. URLhaus/OpenPhish/ThreatFox feed rows
 set the independent-feed flag; synthetic demo rows use `feed_source: demo` and
 receive no feed confidence bonus.
+
+Ingestion defaults to URLhaus; use `--feeds openphish`, `--feeds threatfox`, or
+`--feeds all` to select the new sources. `--limit` applies per feed;
+`--threat-type` and DNS resolution apply only to URLhaus. OpenPhish reports
+`phishing` using its fetch time; ThreatFox normalizes `botnet_cc` to `c2` and
+`payload_delivery` to `malware_download`. ThreatFox domain and IP/port indicators
+are represented as HTTP URLs; the scanner inspects HTTP text, so a C2 listing
+alone does not establish a scanner verdict or guarantee a fetchable page.
+
+OpenPhish and ThreatFox IDs are namespaced and stable across polls. The same
+URL on different feeds remains separate events and may be scanned twice.
+Domain activity counts distinct URLs per hour, while threat-type and verdict
+graphs count events. A feed failure allows other selected feeds to proceed;
+if all candidate records fail mapping, ingestion exits with code 3.
+The daemon defaults to all feeds, backs off each failing feed separately, and
+continues polling. `RUNS_TABLE` defaults to `ingest_runs`; it stores per-attempt
+counters and errors for `get_feed_stats()`. This telemetry is separate from the
+three scanner graphs. A telemetry write failure does not undo successful ingestion.
 
 ### Refined integration tests and graphs
 
@@ -82,6 +105,20 @@ Starlette/httpx deprecation. The generated [SVG](../artifacts/member1-integratio
 [PNG](../artifacts/member1-integration.png) and [JSON](../artifacts/member1-integration.json)
 show the synthetic fixture: two hourly buckets with 1 and 2 URLs, threat counts
 of 2 phishing and 1 malware-download reports, and one of each scanner verdict.
+
+Multi-feed update validation on 2026-10-09: focused offline tests finished
+`37 passed, 6 skipped`; ingestion self-checks finished `32/32 checks passed`.
+The added tests cover feed selection, malformed URLs/ports/timestamps, IPv6,
+stable IDs, partial feed outages, and feed provenance reaching the scanner.
+Daemon tests verify scheduling after crashed cycles, backoff after 1,100
+consecutive failures, recovery after success, telemetry write failures, and
+restoration of both smoke-test table overrides. Dashboard tests cover missing
+run tables, bounded recent-run queries, UTC timestamps and mapped counters.
+An added opt-in database test checks OpenPhish/ThreatFox repeat polling,
+write-back, overlapping URL counts and `c2` graph categories. The database
+rerun could not be completed: the temporary ClickHouse container exited,
+and the environment's approval review blocked restarting it. Live feeds
+were not contacted.
 
 ## Setup
 

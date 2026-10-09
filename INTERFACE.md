@@ -122,6 +122,26 @@ is answerable only if the original event survives.
 
 ---
 
+## `get_feed_stats(recent: int = 10) -> dict`
+
+Read-only pipeline statistics (additive; for dashboards / the demo). Also printed by
+`python threatfeed.py --stats`.
+
+```python
+{
+  "by_feed":        [{"feed_source": "threatfox", "rows": 119, "pending": 119}, ...],
+  "by_threat_type": [{"threat_type": "phishing", "rows": 100}, ...],
+  "by_status":      [{"takedown_status": "PENDING", "rows": 289}, ...],
+  "recent_runs":    [{"run_ts": datetime(UTC), "feed_source": "urlhaus", "fetched": 1000,
+                      "inserted": 20, "duplicates": 0, "error": "", "duration_ms": 1456}, ...],
+}
+```
+
+`recent_runs` comes from the `ingest_runs` table (newest first, at most `recent`) and is `[]`
+if that table does not exist yet. Raises `ValueError` if `recent` is not an int >= 1.
+
+---
+
 ## Schema Member 2 may rely on
 
 ```sql

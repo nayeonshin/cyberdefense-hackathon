@@ -25,9 +25,13 @@ Usage:
     python3 ingest.py --threat-type phishing  # only rows whose threat == phishing
     python3 ingest.py --resolve-dns           # best-effort DNS for hostnames (off by default)
     python3 ingest.py --dry-run               # fetch + map only, do not touch the DB
+    python3 ingest.py --feeds all             # urlhaus + openphish (phishing) + threatfox (C2/IOCs)
+    python3 ingest.py --feeds openphish,threatfox --limit 100   # --limit applies per feed
     python3 ingest.py --reset-schema          # DROP + recreate the table, then ingest
     python3 ingest.py --interval 600          # keep polling every 600 s (minimum 300)
-    python3 ingest.py --self-test             # timestamp-parser self-check, no network
+    python3 ingest.py --daemon                # autonomous: all feeds, per-feed schedule + backoff
+    python3 ingest.py --daemon --max-cycles 2 --interval 60   # bounded demo run
+    python3 ingest.py --self-test             # parser + scheduler self-check, no network
 
 Environment (read from .env / clickhouse.env, or the process env):
     CLICKHOUSE_HOST       default: localhost  (or a ClickHouse Cloud host)
@@ -36,23 +40,28 @@ Environment (read from .env / clickhouse.env, or the process env):
     CLICKHOUSE_PASSWORD   default: (empty)
     CLICKHOUSE_SECURE     default: off; set to 1 for ClickHouse Cloud (HTTPS)
     THREATS_TABLE         default: incoming_threats (tests point this elsewhere)
+    RUNS_TABLE            default: ingest_runs -- per-feed run telemetry (tests point this elsewhere)
     URLHAUS_AUTH_KEY      required -- see https://auth.abuse.ch/
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import ipaddress
 import logging
 import os
 import re
+import signal
 import socket
 import sys
+import threading
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Sequence
+from typing import Any, Callable, Mapping, Sequence
 from urllib.parse import urlsplit
 
 import clickhouse_connect
@@ -69,6 +78,12 @@ ENV_FILE_CANDIDATES: tuple[str, ...] = (".env", "clickhouse.env")
 
 URLHAUS_RECENT_URL = "https://urlhaus-api.abuse.ch/v1/urls/recent/"
 URLHAUS_TIMEOUT_SECONDS = 30
+OPENPHISH_FEED_URL = "https://openphish.com/feed.txt"
+THREATFOX_API_URL = "https://threatfox-api.abuse.ch/api/v1/"
+FEED_TIMEOUT_SECONDS = 20
+THREATFOX_IOC_TYPES = frozenset({"url", "domain", "ip:port"})
+# ThreatFox `threat_type` -> normalized value; unknown values pass through lower-cased.
+THREATFOX_THREAT_MAP = {"botnet_cc": "c2", "payload_delivery": "malware_download"}
 # URLhaus `date_added` values are UTC. Live (measured 2026-10-09) they are
 # "2026-10-09 18:55:15 UTC" with a trailing zone marker; older docs showed the
 # bare form. ISO-8601 ("...T...") is accepted too. Both are tried.
@@ -118,6 +133,40 @@ ORDER BY `timestamp`
 """
 CREATE_TABLE_DDL = CREATE_TABLE_TEMPLATE.format(table=TABLE_NAME)
 
+# Per-feed run telemetry. Deliberately a separate table: `incoming_threats`
+# keeps the brief's schema untouched.
+RUNS_TABLE_NAME = "ingest_runs"  # default; override with RUNS_TABLE
+RUNS_TABLE_ENV_VAR = "RUNS_TABLE"
+RUN_COLUMN_NAMES = [
+    "run_ts",
+    "feed_source",
+    "fetched",
+    "mapped",
+    "inserted",
+    "duplicates",
+    "error",
+    "duration_ms",
+]
+CREATE_RUNS_TABLE_TEMPLATE = """
+CREATE TABLE IF NOT EXISTS {table}
+(
+    run_ts      DateTime,
+    feed_source LowCardinality(String),
+    fetched     UInt32,
+    mapped      UInt32,
+    inserted    UInt32,
+    duplicates  UInt32,
+    error       String,
+    duration_ms UInt32
+)
+ENGINE = MergeTree
+ORDER BY (feed_source, run_ts)
+"""
+
+# Daemon scheduling.
+DAEMON_MIN_INTERVAL_SECONDS = 60  # floor for --interval in --daemon mode
+BACKOFF_CAP_SECONDS = 3600  # a repeatedly failing feed is retried at most this rarely
+
 log = logging.getLogger("ingest")
 
 
@@ -133,6 +182,16 @@ def table_name(explicit: str | None = None) -> str:
     validated as a plain identifier before it is ever placed into SQL.
     """
     name = (explicit or os.getenv(TABLE_ENV_VAR, "") or TABLE_NAME).strip()
+    if not _IDENTIFIER_RE.match(name):
+        raise RuntimeError(
+            f"Invalid table name {name!r}: only letters, digits and '_' are allowed"
+        )
+    return name
+
+
+def runs_table_name(explicit: str | None = None) -> str:
+    """Return the run-telemetry table: `explicit`, else $RUNS_TABLE, else default."""
+    name = (explicit or os.getenv(RUNS_TABLE_ENV_VAR, "") or RUNS_TABLE_NAME).strip()
     if not _IDENTIFIER_RE.match(name):
         raise RuntimeError(
             f"Invalid table name {name!r}: only letters, digits and '_' are allowed"
@@ -533,6 +592,281 @@ def map_records(
 
 
 # --------------------------------------------------------------------------- #
+# Feed adapters (registry: FEEDS)
+# --------------------------------------------------------------------------- #
+
+
+class NothingMappedError(RuntimeError):
+    """A feed returned candidate records but none could be mapped (exit 3)."""
+
+
+@dataclass(frozen=True)
+class Feed:
+    """One feed adapter: `fetch(limit)` -> raw items, `map(raw, args)` -> rows.
+
+    Rows are tuples in COLUMN_NAMES order. `args` carries per-run options
+    (`limit`, `threat_type`, `resolve_dns`); only URLhaus uses the latter two.
+    `min_interval` is the shortest polling period (seconds) `--daemon` uses.
+    """
+
+    name: str
+    fetch: Callable[[int], list[Any]]
+    map: Callable[[list[Any], argparse.Namespace], list[tuple[Any, ...]]]
+    min_interval: int = 600
+
+
+def _abuse_ch_key() -> str:
+    key = os.getenv("URLHAUS_AUTH_KEY", "").strip()
+    if not key:
+        raise RuntimeError(
+            "URLHAUS_AUTH_KEY is not set (the same abuse.ch Auth-Key is used for "
+            "ThreatFox); get one at https://auth.abuse.ch/"
+        )
+    return key
+
+
+# --- URLhaus: thin wrapper over the existing functions ---------------------- #
+
+
+def _fetch_urlhaus(limit: int) -> list[Any]:
+    return fetch_recent_urls()  # `limit` and the threat filter are applied in map
+
+
+def _map_urlhaus(raw: list[Any], args: argparse.Namespace) -> list[tuple[Any, ...]]:
+    log_threat_breakdown(raw, args.threat_type)
+    candidates = select_records(raw, args.limit, args.threat_type)
+    rows = map_records(
+        raw, args.limit, threat_type=args.threat_type, resolve_dns=args.resolve_dns
+    )
+    if candidates and not rows:
+        raise NothingMappedError(
+            f"Mapped 0/{len(candidates)} records although the feed returned "
+            f"{len(raw)} record(s) matching threat_type={args.threat_type!r} -- "
+            "every record failed validation. This is the signature of a "
+            "`date_added` format mismatch; refusing to report success."
+        )
+    if not candidates:
+        log.warning(
+            "No records match threat_type=%r in this poll (feed returned %d); "
+            "nothing to ingest",
+            args.threat_type,
+            len(raw),
+        )
+    return rows
+
+
+# --- OpenPhish --------------------------------------------------------------- #
+
+
+def _fetch_openphish(limit: int) -> list[Any]:
+    """Fetch the plain-text feed; returns [{'url', 'fetched_at'}] (first `limit`)."""
+    log.info("Fetching %s", OPENPHISH_FEED_URL)
+    try:
+        response = requests.get(OPENPHISH_FEED_URL, timeout=FEED_TIMEOUT_SECONDS)
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise RuntimeError(f"OpenPhish request failed: {exc}") from exc
+    fetched_at = datetime.now(timezone.utc).replace(microsecond=0)
+    lines = [ln.strip() for ln in response.text.splitlines() if ln.strip()]
+    log.info("OpenPhish returned %d line(s)", len(lines))
+    return [{"url": ln, "fetched_at": fetched_at} for ln in lines[:limit]]
+
+
+def map_openphish(raw: Sequence[Any]) -> list[tuple[Any, ...]]:
+    """Map OpenPhish items onto rows; blank/invalid URLs are skipped.
+
+    The feed carries no timestamp, so the fetch time (UTC) is used.
+    event_id = 'openphish-' + first 24 hex chars of sha256('openphish|' + url).
+    """
+    rows: list[tuple[Any, ...]] = []
+    skipped = 0
+    for item in raw:
+        url = str(item.get("url") or "").strip() if isinstance(item, dict) else ""
+        fetched_at = item.get("fetched_at") if isinstance(item, dict) else None
+        if isinstance(fetched_at, datetime):
+            fetched_at = (fetched_at.replace(tzinfo=timezone.utc) if fetched_at.tzinfo is None
+                          else fetched_at.astimezone(timezone.utc))
+        else:
+            fetched_at = parse_timestamp(fetched_at)
+        host = _http_host(url)
+        if (
+            not host
+            or not url.lower().startswith(("http://", "https://"))
+            or not fetched_at
+        ):
+            skipped += 1
+            continue
+        digest = hashlib.sha256(f"openphish|{url}".encode("utf-8")).hexdigest()[:24]
+        rows.append(
+            (
+                f"openphish-{digest}",
+                url,
+                host,
+                host if is_ip_literal(host) else "",
+                fetched_at,
+                "phishing",
+                DEFAULT_TAKEDOWN_STATUS,
+                "openphish",
+            )
+        )
+    if skipped:
+        log.warning("OpenPhish: skipped %d blank/invalid line(s)", skipped)
+    return rows
+
+
+# --- ThreatFox --------------------------------------------------------------- #
+
+
+def _fetch_threatfox(limit: int) -> list[Any]:
+    """POST get_iocs(days=1); keep url/domain/ip:port IOCs, newest first, `limit`."""
+    log.info("Fetching %s (get_iocs, days=1)", THREATFOX_API_URL)
+    try:
+        response = requests.post(
+            THREATFOX_API_URL,
+            json={"query": "get_iocs", "days": 1},
+            headers={"Auth-Key": _abuse_ch_key()},
+            timeout=FEED_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except requests.RequestException as exc:
+        raise RuntimeError(f"ThreatFox request failed: {exc}") from exc
+    except ValueError as exc:
+        raise RuntimeError(f"ThreatFox returned non-JSON content: {exc}") from exc
+
+    if not isinstance(payload, dict):
+        raise RuntimeError("ThreatFox returned a non-object JSON payload")
+    if payload.get("query_status") != "ok" or not isinstance(payload.get("data"), list):
+        raise RuntimeError(
+            f"ThreatFox query_status={payload.get('query_status')!r}, "
+            f"data={type(payload.get('data')).__name__}"
+        )
+    data = payload["data"]
+    iocs = [
+        d
+        for d in data
+        if isinstance(d, dict) and d.get("ioc_type") in THREATFOX_IOC_TYPES
+    ]
+    iocs.sort(key=lambda d: str(d.get("first_seen") or ""), reverse=True)
+    log.info(
+        "ThreatFox returned %d IOC(s); %d of type url/domain/ip:port",
+        len(data),
+        len(iocs),
+    )
+    return iocs[:limit]
+
+
+def map_threatfox(raw: Sequence[Any]) -> list[tuple[Any, ...]]:
+    """Map ThreatFox IOCs (url, domain, ip:port) onto rows; others are skipped."""
+    rows: list[tuple[Any, ...]] = []
+    skipped = 0
+    families: Counter[str] = Counter()
+    for ioc in raw:
+        if not isinstance(ioc, dict):
+            skipped += 1
+            continue
+        ioc_id = str(ioc.get("id") or "").strip()
+        value = str(ioc.get("ioc") or "").strip()
+        ioc_type = ioc.get("ioc_type")
+        timestamp = parse_timestamp(ioc.get("first_seen"))
+        if not ioc_id or not value or timestamp is None:
+            skipped += 1
+            continue
+
+        if ioc_type == "url":
+            target_url = value
+            domain = _http_host(value)
+            ip = domain if is_ip_literal(domain) else ""
+        elif ioc_type == "domain":
+            domain = _host_of(value)
+            target_url = f"http://{domain}"
+            ip = domain if is_ip_literal(domain) else ""
+        elif ioc_type == "ip:port":
+            host, _, port = value.rpartition(":")
+            host = host.removeprefix("[").removesuffix("]")
+            if not is_ip_literal(host) or not port.isascii() or not port.isdigit() or not 1 <= int(port) <= 65535:
+                skipped += 1
+                continue
+            domain, ip = host, host
+            authority = f"[{host}]" if ":" in host else host
+            target_url = f"http://{authority}:{port}"
+        else:
+            skipped += 1
+            continue
+        if not domain:
+            skipped += 1
+            continue
+
+        raw_threat = str(ioc.get("threat_type") or "").strip().lower()
+        threat = THREATFOX_THREAT_MAP.get(raw_threat, raw_threat or "unknown")
+        families[str(ioc.get("malware_printable") or ioc.get("malware") or "unknown")] += 1
+        rows.append(
+            (
+                f"threatfox-{ioc_id}",
+                target_url,
+                domain,
+                ip,
+                timestamp,
+                threat,
+                DEFAULT_TAKEDOWN_STATUS,
+                "threatfox",
+            )
+        )
+    if skipped:
+        log.warning("ThreatFox: skipped %d unsupported/malformed IOC(s)", skipped)
+    if families:
+        log.info(
+            "ThreatFox malware families: %s",
+            ", ".join(f"{n}={c}" for n, c in families.most_common(8)),
+        )
+    return rows
+
+
+def _http_host(url: str) -> str:
+    """Return the host only for an HTTP(S) URL with a valid port."""
+    try:
+        parsed = urlsplit(url)
+        if parsed.scheme.lower() not in {"http", "https"}:
+            return ""
+        port = parsed.port
+        if port is not None and not 1 <= port <= 65535:
+            return ""
+    except ValueError:
+        return ""
+    return _host_of(url, is_url=True)
+
+
+def _map_candidates(name, mapper, raw):
+    rows = mapper(raw)
+    if raw and not rows:
+        raise NothingMappedError(f"{name}: mapped 0/{len(raw)} candidate records")
+    return rows
+
+
+FEEDS: dict[str, Feed] = {
+    "urlhaus": Feed("urlhaus", _fetch_urlhaus, _map_urlhaus, min_interval=300),
+    "openphish": Feed("openphish", _fetch_openphish, lambda raw, _a: _map_candidates("OpenPhish", map_openphish, raw), min_interval=600),
+    "threatfox": Feed("threatfox", _fetch_threatfox, lambda raw, _a: _map_candidates("ThreatFox", map_threatfox, raw), min_interval=600),
+}
+DEFAULT_FEEDS = "urlhaus"
+
+
+def parse_feed_names(spec: str) -> list[str]:
+    """Turn a `--feeds` value ('all' or a comma list) into registry names."""
+    names = [n.strip().lower() for n in spec.split(",") if n.strip()]
+    if not names:
+        raise ValueError("--feeds must not be empty")
+    if names == ["all"]:
+        return list(FEEDS)
+    unknown = [n for n in names if n not in FEEDS]
+    if unknown:
+        raise ValueError(
+            f"unknown feed(s) {unknown}; choose from {', '.join(FEEDS)} or 'all'"
+        )
+    return list(dict.fromkeys(names))
+
+
+# --------------------------------------------------------------------------- #
 # Insert + verify
 # --------------------------------------------------------------------------- #
 
@@ -618,6 +952,163 @@ def report_table_state(
 # --------------------------------------------------------------------------- #
 
 
+def _feed_self_tests() -> tuple[int, int]:
+    """Offline checks for the OpenPhish and ThreatFox mappers -> (failures, total)."""
+    t = datetime(2026, 10, 9, 12, 0, 0, tzinfo=timezone.utc)
+    checks: list[tuple[str, bool]] = []
+
+    phish = map_openphish(
+        [
+            {"url": "https://Evil.Example.com/login?x=1", "fetched_at": t},
+            {"url": "", "fetched_at": t},
+            {"url": "not a url", "fetched_at": t},
+            {"url": "http://1.2.3.4/a", "fetched_at": t},
+        ]
+    )
+    checks.append(("openphish: blank/invalid skipped, 2 rows", len(phish) == 2))
+    checks.append(
+        (
+            "openphish: hostname row",
+            phish[0][1:] == (
+                "https://Evil.Example.com/login?x=1",
+                "evil.example.com",
+                "",
+                t,
+                "phishing",
+                "PENDING",
+                "openphish",
+            ),
+        )
+    )
+    checks.append(("openphish: IP host fills ip_address", phish[1][2:4] == ("1.2.3.4", "1.2.3.4")))
+    again = map_openphish([{"url": "http://1.2.3.4/a", "fetched_at": t}])
+    checks.append(("openphish: event_id stable", again[0][0] == phish[1][0]))
+    checks.append(("openphish: event_id format", phish[0][0].startswith("openphish-") and len(phish[0][0]) == 34))
+
+    def ioc(i: str, value: str, kind: str, threat: str) -> dict[str, Any]:
+        return {
+            "id": i,
+            "ioc": value,
+            "ioc_type": kind,
+            "threat_type": threat,
+            "malware_printable": "Fam",
+            "first_seen": "2026-10-09 19:45:48 UTC",
+        }
+
+    ts = datetime(2026, 10, 9, 19, 45, 48, tzinfo=timezone.utc)
+    tf = map_threatfox(
+        [
+            ioc("1", "http://bad.example.org/x.exe", "url", "payload_delivery"),
+            ioc("2", "c2.example.net", "domain", "botnet_cc"),
+            ioc("3", "94.158.187.147:25204", "ip:port", "botnet_cc"),
+            ioc("4", "d41d8cd98f00b204e9800998ecf8427e", "md5_hash", "payload"),
+        ]
+    )
+    checks.append(("threatfox: hash IOC skipped, 3 rows", len(tf) == 3))
+    checks.append(
+        (
+            "threatfox: url row",
+            tf[0] == ("threatfox-1", "http://bad.example.org/x.exe", "bad.example.org", "", ts, "malware_download", "PENDING", "threatfox"),
+        )
+    )
+    checks.append(
+        (
+            "threatfox: domain row + botnet_cc -> c2",
+            tf[1] == ("threatfox-2", "http://c2.example.net", "c2.example.net", "", ts, "c2", "PENDING", "threatfox"),
+        )
+    )
+    checks.append(
+        (
+            "threatfox: ip:port row",
+            tf[2] == ("threatfox-3", "http://94.158.187.147:25204", "94.158.187.147", "94.158.187.147", ts, "c2", "PENDING", "threatfox"),
+        )
+    )
+    checks.append(("threatfox: event_id stable", map_threatfox([ioc("1", "http://bad.example.org/x.exe", "url", "payload_delivery")])[0][0] == tf[0][0]))
+    checks.append(("parse_feed_names: all/list/unknown", parse_feed_names("all") == list(FEEDS) and parse_feed_names("openphish, threatfox") == ["openphish", "threatfox"] and _raises(ValueError, parse_feed_names, "nope")))
+    checks.extend(scheduler_self_tests())
+
+    failures = 0
+    for label, ok in checks:
+        print(f"[{'PASS' if ok else 'FAIL'}] {label}")
+        failures += 0 if ok else 1
+    return failures, len(checks)
+
+
+def scheduler_self_tests() -> list[tuple[str, bool]]:
+    """Offline checks of `Scheduler` / `run_daemon` with an injectable clock."""
+    now = [1000.0]
+    clock = lambda: now[0]  # noqa: E731
+    names = ["urlhaus", "openphish", "threatfox"]
+    out: list[tuple[str, bool]] = []
+
+    s = Scheduler(names, clock=clock)
+    out.append(("scheduler: all feeds due at start", s.due() == names))
+    out.append(
+        (
+            "scheduler: per-feed intervals 300/600/600",
+            [s.interval(n) for n in names] == [300, 600, 600],
+        )
+    )
+    for n in names:
+        s.record(n, ok=True)
+    out.append(("scheduler: nothing due right after a run", s.due() == []))
+    out.append(("scheduler: sleeps until earliest feed (300 s)", s.seconds_until_next() == 300))
+    now[0] += 300
+    out.append(("scheduler: only urlhaus due after 300 s", s.due() == ["urlhaus"]))
+    now[0] += 300
+    out.append(("scheduler: all due after 600 s", s.due() == names))
+
+    b = Scheduler(["urlhaus"], clock=clock)
+    seen = []
+    for _ in range(6):
+        b.record("urlhaus", ok=False)
+        seen.append(b.interval("urlhaus"))
+    out.append(("backoff: doubles 600,1200,2400 then caps at 3600", seen == [600, 1200, 2400, 3600, 3600, 3600]))
+    b.record("urlhaus", ok=True)
+    out.append(("backoff: resets to base after success", b.interval("urlhaus") == 300))
+
+    f = Scheduler(names, override=10, clock=clock)
+    out.append(("interval floor: override 10 -> 60 s", [f.interval(n) for n in names] == [60, 60, 60]))
+    o = Scheduler(names, override=900, clock=clock)
+    out.append(("interval override applies to all feeds", [o.interval(n) for n in names] == [900, 900, 900]))
+
+    # run_daemon end to end with a fake clock, runner and sleep.
+    calls: list[list[str]] = []
+    slept: list[float] = []
+
+    def fake_sleep(sec: float) -> None:
+        slept.append(sec)
+        now[0] += sec
+
+    def fake_runner(
+        _args: argparse.Namespace, due: Sequence[str], *, reset_schema: bool
+    ) -> tuple[int, dict[str, dict[str, Any]]]:
+        calls.append(list(due))
+        return 0, {n: {"error": "boom" if n == "threatfox" else ""} for n in due}
+
+    ns = argparse.Namespace(feed_names=names, interval=0, max_cycles=3)
+    code = run_daemon(
+        ns,
+        clock=clock,
+        sleep=fake_sleep,
+        runner=fake_runner,
+        count_rows=lambda: 0,
+        install_signals=False,
+    )
+    out.append(("daemon: exits 0 after --max-cycles", code == EXIT_OK and len(calls) == 3))
+    out.append(("daemon: cycle 1 runs all, cycle 2 only urlhaus", calls[:2] == [names, ["urlhaus"]]))
+    out.append(("daemon: cycle 3 runs urlhaus+openphish (threatfox backed off)", calls[2:] == [["urlhaus", "openphish"]]))
+    return out
+
+
+def _raises(exc: type[BaseException], fn: Callable[..., Any], *a: Any) -> bool:
+    try:
+        fn(*a)
+    except exc:
+        return True
+    return False
+
+
 def run_self_test() -> int:
     """Minimal timestamp-parser self-check covering both documented formats.
 
@@ -643,7 +1134,10 @@ def run_self_test() -> int:
         print(f"[{'PASS' if ok else 'FAIL'}] parse_timestamp({raw!r}) -> None")
         failures += 0 if ok else 1
 
-    print(f"self-test: {len(cases) + 4 - failures}/{len(cases) + 4} checks passed")
+    feed_failures, feed_total = _feed_self_tests()
+    failures += feed_failures
+    total = len(cases) + 4 + feed_total  # scheduler checks are part of feed_total
+    print(f"self-test: {total - failures}/{total} checks passed")
     return 1 if failures else 0
 
 
@@ -661,6 +1155,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=int,
         default=DEFAULT_LIMIT,
         help=f"maximum records to take from the URLhaus array (default: {DEFAULT_LIMIT})",
+    )
+    parser.add_argument(
+        "--feeds",
+        default=None,
+        help=(
+            "comma-separated feeds to ingest, or 'all' "
+            f"(choices: {', '.join(FEEDS)}; default: {DEFAULT_FEEDS}, "
+            "or 'all' with --daemon); --limit applies per feed"
+        ),
     )
     parser.add_argument(
         "--threat-type",
@@ -700,8 +1203,26 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         metavar="SECONDS",
         help=(
             "keep polling every SECONDS (default: off = one-shot; minimum "
-            f"{MIN_POLL_INTERVAL_SECONDS} to respect URLhaus rate limits)"
+            f"{MIN_POLL_INTERVAL_SECONDS} to respect URLhaus rate limits). With "
+            f"--daemon it overrides every feed's own interval (minimum "
+            f"{DAEMON_MIN_INTERVAL_SECONDS})"
         ),
+    )
+    parser.add_argument(
+        "--daemon",
+        action="store_true",
+        help=(
+            "run forever, hands-off: each feed on its own schedule (urlhaus 300 s, "
+            "openphish/threatfox 600 s), exponential backoff on errors, heartbeat "
+            "per cycle; defaults to --feeds all; stop with Ctrl-C/SIGTERM"
+        ),
+    )
+    parser.add_argument(
+        "--max-cycles",
+        type=int,
+        default=0,
+        metavar="N",
+        help="with --daemon: stop after N cycles (for tests and demos; default: unlimited)",
     )
     parser.add_argument(
         "--self-test",
@@ -720,68 +1241,314 @@ EXIT_USAGE = 2
 EXIT_NOTHING_MAPPED = 3
 
 
-def run_once(args: argparse.Namespace, *, reset_schema: bool) -> int:
-    """One poll: fetch -> map -> dedup -> insert. Returns a process exit code."""
-    client = None
+def _summary_line(name: str, stat: dict[str, Any]) -> str:
+    return (
+        f"[feed] {name}: fetched={stat['fetched']} mapped={stat['mapped']} "
+        f"new={stat['new']} duplicates={stat['duplicates']} error={stat['error'] or 'none'}"
+    )
+
+
+def record_run_stats(
+    client: clickhouse_connect.driver.client.Client | None,
+    stats: Mapping[str, Mapping[str, Any]],
+    *,
+    table: str | None = None,
+) -> clickhouse_connect.driver.client.Client | None:
+    """Insert one `ingest_runs` row per feed attempt; NEVER raises.
+
+    Creates the table if needed (idempotent). `client` may be None, in which
+    case a connection is opened; the (possibly new) client is returned so the
+    caller can close it. Any failure is logged as a warning only: telemetry
+    must not be able to break ingestion.
+    """
     try:
-        records = fetch_recent_urls()
-        log_threat_breakdown(records, args.threat_type)
-        candidates = select_records(records, args.limit, args.threat_type)
-        rows = map_records(
-            records,
-            args.limit,
-            threat_type=args.threat_type,
-            resolve_dns=args.resolve_dns,
-        )
-
-        if candidates and not rows:
-            log.error(
-                "Mapped 0/%d records although the feed returned %d record(s) "
-                "matching threat_type=%r -- every record failed validation. "
-                "This is the signature of a `date_added` format mismatch; "
-                "refusing to report success.",
-                len(candidates),
-                len(records),
-                args.threat_type,
+        if client is None:
+            client = connect_clickhouse()
+    except Exception as exc:  # noqa: BLE001 -- telemetry must never crash ingest
+        log.warning("Could not record run stats (connect failed): %s", exc)
+        return None
+    try:
+        table = runs_table_name(table)
+        client.command(CREATE_RUNS_TABLE_TEMPLATE.format(table=table))
+        run_ts = datetime.now(timezone.utc).replace(microsecond=0)
+        rows = [
+            (
+                run_ts,
+                name,
+                int(s["fetched"]),
+                int(s["mapped"]),
+                int(s["new"]),
+                int(s["duplicates"]),
+                str(s["error"] or ""),
+                min(int(s.get("duration_ms", 0)), 2**32 - 1),
             )
-            return EXIT_NOTHING_MAPPED
-        if not candidates:
-            log.warning(
-                "No records match threat_type=%r in this poll (feed returned %d); "
-                "nothing to ingest",
-                args.threat_type,
-                len(records),
-            )
+            for name, s in stats.items()
+        ]
+        client.insert(table, rows, column_names=RUN_COLUMN_NAMES)
+        log.info("Recorded %d run row(s) in %s", len(rows), table)
+    except Exception as exc:  # noqa: BLE001 -- telemetry must never crash ingest
+        log.warning("Could not record run stats: %s", exc)
+    return client
 
-        if args.dry_run:
-            log.info("Dry run: %d row(s) mapped, database untouched", len(rows))
-            for row in rows[:5]:
-                log.info("  %s", row)
-            if len(rows) > 5:
-                log.info("  ... and %d more", len(rows) - 5)
-            return EXIT_OK
 
-        client = connect_clickhouse()
-        ensure_schema(client, recreate=reset_schema)
-        fresh, duplicates = drop_duplicates(client, rows)
-        log.info("Dedup: %d new, %d duplicates skipped", len(fresh), duplicates)
-        inserted = insert_rows(client, fresh)
-        report_table_state(client)
-        log.info(
-            "Done: %d row(s) inserted, %d duplicate(s) skipped", inserted, duplicates
-        )
-        return EXIT_OK
+def run_once(args: argparse.Namespace, *, reset_schema: bool) -> int:
+    """One poll over the selected feeds (`args.feed_names`); returns the exit code."""
+    names: list[str] = getattr(args, "feed_names", None) or [DEFAULT_FEEDS]
+    code, _stats = run_feeds(args, names, reset_schema=reset_schema)
+    return code
 
-    except RuntimeError as exc:
-        log.error("%s", exc)
-        return EXIT_RUNTIME
-    except Exception:
-        log.exception("Unexpected failure during ingest")
-        return EXIT_RUNTIME
+
+def run_feeds(
+    args: argparse.Namespace, names: Sequence[str], *, reset_schema: bool
+) -> tuple[int, dict[str, dict[str, Any]]]:
+    """One poll over `names`: fetch -> map -> dedup -> insert -> record stats.
+
+    Each feed runs in its own try/except, so one failing feed is logged and the
+    others still run. Exit code: 3 if any feed mapped nothing from a non-empty
+    fetch (parser regression), else 1 if every feed failed, else 0. Also returns
+    the per-feed stats (non-empty `error` = that feed failed), which the daemon
+    uses for backoff. Unless `--dry-run`, one `ingest_runs` row per feed is
+    written after the attempt (success or failure).
+    """
+    stats: dict[str, dict[str, Any]] = {
+        n: {
+            "fetched": 0,
+            "mapped": 0,
+            "new": 0,
+            "duplicates": 0,
+            "error": "",
+            "duration_ms": 0,
+        }
+        for n in names
+    }
+    staged: dict[str, list[tuple[Any, ...]]] = {}
+    nothing_mapped = False
+    client = None
+    exit_code: int | None = None
+    try:
+        for name in names:
+            feed, stat = FEEDS[name], stats[name]
+            started = time.monotonic()
+            try:
+                raw = feed.fetch(args.limit)
+                stat["fetched"] = len(raw)
+                rows = feed.map(raw, args)
+                stat["mapped"] = len(rows)
+                staged[name] = rows
+            except NothingMappedError as exc:
+                log.error("[%s] %s", name, exc)
+                stat["error"] = "nothing mapped"
+                nothing_mapped = True
+            except RuntimeError as exc:
+                log.error("[%s] %s", name, exc)
+                stat["error"] = str(exc)[:120]
+            except Exception as exc:  # noqa: BLE001 -- feed isolation by design
+                log.exception("[%s] unexpected failure", name)
+                stat["error"] = f"{type(exc).__name__}: {exc}"[:120]
+            stat["duration_ms"] = int((time.monotonic() - started) * 1000)
+
+        if staged and args.dry_run:
+            for name, rows in staged.items():
+                stats[name]["new"] = stats[name]["duplicates"] = "n/a"
+                log.info("Dry run [%s]: %d row(s) mapped, database untouched", name, len(rows))
+                for row in rows[:5]:
+                    log.info("  %s", row)
+                if len(rows) > 5:
+                    log.info("  ... and %d more", len(rows) - 5)
+        elif staged:
+            client = connect_clickhouse()
+            ensure_schema(client, recreate=reset_schema)
+            for name, rows in staged.items():
+                stat = stats[name]
+                started = time.monotonic()
+                try:
+                    fresh, duplicates = drop_duplicates(client, rows)
+                    log.info("[%s] Dedup: %d new, %d duplicates skipped", name, len(fresh), duplicates)
+                    stat["new"] = insert_rows(client, fresh)
+                    stat["duplicates"] = duplicates
+                except Exception as exc:  # noqa: BLE001 -- feed isolation by design
+                    log.exception("[%s] database step failed", name)
+                    stat["error"] = f"{type(exc).__name__}: {exc}"[:120]
+                stat["duration_ms"] += int((time.monotonic() - started) * 1000)
+            report_table_state(client)
+    except Exception as exc:  # noqa: BLE001 -- connection/schema failure
+        if isinstance(exc, RuntimeError):
+            log.error("%s", exc)
+        else:
+            log.exception("Unexpected failure during ingest")
+        for stat in stats.values():
+            if not stat["error"]:
+                stat["error"] = f"{type(exc).__name__}: {exc}"[:120]
+        exit_code = EXIT_RUNTIME
     finally:
+        if not args.dry_run:
+            client = record_run_stats(client, stats)
         if client is not None:
             client.close()
             log.debug("ClickHouse connection closed")
+
+    if exit_code is not None:
+        return exit_code, stats
+    for name in names:
+        print(_summary_line(name, stats[name]))
+    if nothing_mapped:
+        return EXIT_NOTHING_MAPPED, stats
+    if all(stats[n]["error"] for n in names):
+        return EXIT_RUNTIME, stats
+    return EXIT_OK, stats
+
+
+# --------------------------------------------------------------------------- #
+# Daemon: per-feed scheduling with backoff
+# --------------------------------------------------------------------------- #
+
+
+class Scheduler:
+    """Pure scheduling state for `--daemon`; time comes from an injectable clock.
+
+    Every feed starts due. After a run, `record(name, ok)` schedules the next
+    one `interval` seconds out: the feed's own `min_interval` (or the global
+    override, never below DAEMON_MIN_INTERVAL_SECONDS), doubled per consecutive
+    failure up to `cap`, and reset to the base after a success.
+    """
+
+    def __init__(
+        self,
+        names: Sequence[str],
+        *,
+        override: int | None = None,
+        clock: Callable[[], float] = time.monotonic,
+        cap: int = BACKOFF_CAP_SECONDS,
+    ) -> None:
+        self._clock = clock
+        self._cap = cap
+        self._base: dict[str, float] = {}
+        for name in names:
+            base = float(override) if override else float(FEEDS[name].min_interval)
+            self._base[name] = max(base, float(DAEMON_MIN_INTERVAL_SECONDS))
+        self._failures: dict[str, int] = {n: 0 for n in names}
+        now = clock()
+        self._next_due: dict[str, float] = {n: now for n in names}
+
+    def interval(self, name: str) -> float:
+        """Current wait for `name`: base * 2**failures, capped (never below base)."""
+        base = self._base[name]
+        ceiling = max(self._cap, base)
+        # Stop doubling at the cap, including after thousands of failed polls.
+        delay = base
+        for _ in range(self._failures[name]):
+            delay = min(delay * 2, ceiling)
+            if delay >= ceiling:
+                break
+        return delay
+
+    def due(self) -> list[str]:
+        """Feeds whose next run time has arrived, in registration order."""
+        now = self._clock()
+        return [n for n, t in self._next_due.items() if t <= now]
+
+    def seconds_until_next(self) -> float:
+        """Seconds until the earliest feed is due (0 when one already is)."""
+        return max(0.0, min(self._next_due.values()) - self._clock())
+
+    def record(self, name: str, ok: bool) -> None:
+        """Note the outcome of a run of `name` and schedule its next run."""
+        self._failures[name] = 0 if ok else self._failures[name] + 1
+        self._next_due[name] = self._clock() + self.interval(name)
+
+
+def count_threat_rows() -> int | None:
+    """Total rows in the threats table for the heartbeat; None if unavailable."""
+    try:
+        client = connect_clickhouse()
+    except Exception:  # noqa: BLE001
+        return None
+    try:
+        return int(client.query(f"SELECT count() FROM {table_name()}").first_row[0])
+    except Exception:  # noqa: BLE001
+        return None
+    finally:
+        client.close()
+
+
+def run_daemon(
+    args: argparse.Namespace,
+    *,
+    reset_schema: bool = False,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], Any] | None = None,
+    runner: Callable[..., tuple[int, dict[str, dict[str, Any]]]] = run_feeds,
+    count_rows: Callable[[], int | None] = count_threat_rows,
+    install_signals: bool = True,
+) -> int:
+    """Run the selected feeds forever on their own schedules (until a signal).
+
+    Each cycle logs a heartbeat, runs only the due feeds, and updates their
+    schedule (backoff on failure, reset on success). SIGINT/SIGTERM stop the
+    loop after the in-flight run finishes (a second signal aborts at once);
+    `--max-cycles N` stops after N cycles. Failures never end the daemon.
+    """
+    names: list[str] = args.feed_names
+    sched = Scheduler(names, override=args.interval or None, clock=clock)
+    stop = threading.Event()
+    wait = sleep if sleep is not None else stop.wait
+    max_cycles = getattr(args, "max_cycles", None) or 0
+
+    def _on_signal(signum: int, _frame: Any) -> None:
+        if stop.is_set():
+            raise KeyboardInterrupt
+        log.info("Received signal %d; stopping after the current step", signum)
+        stop.set()
+
+    previous: dict[int, Any] = {}
+    if install_signals:
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            previous[sig] = signal.signal(sig, _on_signal)
+
+    cycle = 0
+    log.info(
+        "daemon started: feeds=%s intervals=%s",
+        ",".join(names),
+        {n: int(sched.interval(n)) for n in names},
+    )
+    try:
+        while not stop.is_set():
+            due = sched.due()
+            if not due:
+                wait(sched.seconds_until_next())
+                continue
+            cycle += 1
+            total = count_rows()
+            log.info(
+                "[daemon] heartbeat cycle=%d due=%s total_rows=%s",
+                cycle,
+                ",".join(due),
+                "unknown" if total is None else total,
+            )
+            try:
+                code, stats = runner(args, due, reset_schema=reset_schema)
+            except Exception:  # noqa: BLE001 -- the daemon must survive anything
+                log.exception("[daemon] cycle %d crashed; backing off", cycle)
+                code, stats = EXIT_RUNTIME, {}
+            reset_schema = False  # never drop the table more than once
+            for name in due:
+                failed = bool(stats.get(name, {"error": "crashed"})["error"])
+                sched.record(name, ok=not failed)
+                if failed:
+                    log.warning(
+                        "[daemon] %s failed; retry in %ds", name, int(sched.interval(name))
+                    )
+            if max_cycles and cycle >= max_cycles:
+                break
+            if not stop.is_set():
+                log.info("[daemon] next run in %ds", int(sched.seconds_until_next()))
+    except KeyboardInterrupt:
+        pass
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+    log.info("daemon stopped (cycles=%d)", cycle)
+    return EXIT_OK
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -800,7 +1567,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not str(args.threat_type).strip():
         log.error("--threat-type must not be empty (use 'all' to disable filtering)")
         return EXIT_USAGE
-    if args.interval and args.interval < MIN_POLL_INTERVAL_SECONDS:
+    if args.max_cycles < 0 or (args.max_cycles and not args.daemon):
+        log.error("--max-cycles must be >= 0 and requires --daemon")
+        return EXIT_USAGE
+    if args.daemon and args.interval and args.interval < DAEMON_MIN_INTERVAL_SECONDS:
+        log.error(
+            "--interval must be >= %d seconds in --daemon mode (got %d)",
+            DAEMON_MIN_INTERVAL_SECONDS,
+            args.interval,
+        )
+        return EXIT_USAGE
+    if args.daemon and args.dry_run:
+        log.error("--daemon and --dry-run cannot be combined")
+        return EXIT_USAGE
+    if not args.daemon and args.interval and args.interval < MIN_POLL_INTERVAL_SECONDS:
         log.error(
             "--interval must be >= %d seconds to respect URLhaus rate limits (got %d)",
             MIN_POLL_INTERVAL_SECONDS,
@@ -811,12 +1591,29 @@ def main(argv: Sequence[str] | None = None) -> int:
         log.error("--interval and --dry-run cannot be combined")
         return EXIT_USAGE
 
+    try:
+        args.feed_names = parse_feed_names(
+            args.feeds or ("all" if args.daemon else DEFAULT_FEEDS)
+        )
+    except ValueError as exc:
+        log.error("%s", exc)
+        return EXIT_USAGE
+
     load_environment()
     try:
         table_name()
     except RuntimeError as exc:
         log.error("%s", exc)
         return EXIT_USAGE
+
+    try:
+        runs_table_name()
+    except RuntimeError as exc:
+        log.error("%s", exc)
+        return EXIT_USAGE
+
+    if args.daemon:
+        return run_daemon(args, reset_schema=args.reset_schema)
 
     if not args.interval:
         return run_once(args, reset_schema=args.reset_schema)

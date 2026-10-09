@@ -12,6 +12,10 @@ Run directly to print the top 5 pending targets (the demo command):
 
     .venv/bin/python threatfeed.py
 
+or the pipeline statistics (`get_feed_stats()`):
+
+    .venv/bin/python threatfeed.py --stats
+
 Connection settings come from clickhouse.env / .env exactly as for ingest.py
 (the same helpers are reused). `THREATS_TABLE` (default `incoming_threats`)
 selects the table, which lets the smoke test use an isolated one.
@@ -30,10 +34,11 @@ from typing import Any
 
 import clickhouse_connect
 
-from ingest import connect_clickhouse, load_environment, table_name
+from ingest import connect_clickhouse, load_environment, runs_table_name, table_name
 
 __all__ = [
     "VALID_STATUSES",
+    "get_feed_stats",
     "get_pending_targets",
     "update_takedown_status",
 ]
@@ -193,6 +198,111 @@ def update_takedown_status(
     return matched
 
 
+def get_feed_stats(recent: int = 10) -> dict[str, Any]:
+    """Return pipeline statistics (read-only), for dashboards and the demo.
+
+    Keys:
+        by_feed       list[{feed_source, rows, pending}]       rows desc
+        by_threat_type list[{threat_type, rows}]               rows desc
+        by_status     list[{takedown_status, rows}]            rows desc
+        recent_runs   list[{run_ts, feed_source, fetched, mapped, inserted, duplicates,
+                      error, duration_ms}]  newest first, at most `recent`;
+                      [] when the ingest_runs table does not exist yet.
+
+    Raises ValueError when `recent` is not an int >= 1.
+    """
+    if isinstance(recent, bool) or not isinstance(recent, int) or recent < 1:
+        raise ValueError(f"recent must be an int >= 1 (got {recent!r})")
+
+    table = table_name()
+    runs = runs_table_name()
+    client = _client()
+    try:
+        by_feed = client.query(
+            f"SELECT feed_source, count() AS rows, "
+            f"countIf(takedown_status = {{pending:String}}) AS pending "
+            f"FROM {table} GROUP BY feed_source ORDER BY rows DESC, feed_source",
+            parameters={"pending": "PENDING"},
+        ).result_rows
+        by_type = client.query(
+            f"SELECT threat_type, count() AS rows FROM {table} "
+            f"GROUP BY threat_type ORDER BY rows DESC, threat_type"
+        ).result_rows
+        by_status = client.query(
+            f"SELECT takedown_status, count() AS rows FROM {table} "
+            f"GROUP BY takedown_status ORDER BY rows DESC, takedown_status"
+        ).result_rows
+        exists = client.query(
+            "SELECT count() FROM system.tables "
+            "WHERE database = currentDatabase() AND name = {t:String}",
+            parameters={"t": runs},
+        ).first_row[0]
+        run_rows = (
+            client.query(
+                f"SELECT toUnixTimestamp(run_ts), feed_source, fetched, mapped, inserted, "
+                f"duplicates, error, duration_ms FROM {runs} "
+                f"ORDER BY run_ts DESC, feed_source LIMIT {{n:UInt32}}",
+                parameters={"n": recent},
+            ).result_rows
+            if exists
+            else []
+        )
+    finally:
+        client.close()
+
+    return {
+        "by_feed": [
+            {"feed_source": f, "rows": int(n), "pending": int(p)} for f, n, p in by_feed
+        ],
+        "by_threat_type": [{"threat_type": t, "rows": int(n)} for t, n in by_type],
+        "by_status": [{"takedown_status": s, "rows": int(n)} for s, n in by_status],
+        "recent_runs": [
+            {
+                "run_ts": _utc(ts),
+                "feed_source": feed,
+                "fetched": int(fetched),
+                "mapped": int(mapped),
+                "inserted": int(inserted),
+                "duplicates": int(dups),
+                "error": err,
+                "duration_ms": int(ms),
+            }
+            for ts, feed, fetched, mapped, inserted, dups, err, ms in run_rows
+        ],
+    }
+
+
+def _stats_cli() -> int:
+    logging.basicConfig(level=logging.WARNING, format="%(asctime)s [%(levelname)s] %(message)s")
+    try:
+        stats = get_feed_stats()
+    except Exception as exc:  # noqa: BLE001 -- demo entrypoint, report and exit
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"Feed statistics for {table_name()}:")
+    print("\nby_feed")
+    for r in stats["by_feed"]:
+        print(f"  {r['feed_source']:<12} rows={r['rows']:<6} pending={r['pending']}")
+    print("\nby_threat_type")
+    for r in stats["by_threat_type"]:
+        print(f"  {r['threat_type']:<18} rows={r['rows']}")
+    print("\nby_status")
+    for r in stats["by_status"]:
+        print(f"  {r['takedown_status']:<15} rows={r['rows']}")
+    print(f"\nrecent_runs ({runs_table_name()}, newest first)")
+    if not stats["recent_runs"]:
+        print("  (none yet -- run ingest.py)")
+    for r in stats["recent_runs"]:
+        print(
+            f"  {r['run_ts'].strftime('%Y-%m-%d %H:%M:%S')}Z {r['feed_source']:<10} "
+            f"fetched={r['fetched']:<4} inserted={r['inserted']:<4} "
+            f"dups={r['duplicates']:<4} {r['duration_ms']:>5}ms "
+            f"error={r['error'] or 'none'}"
+        )
+    return 0
+
+
 def _demo() -> int:
     logging.basicConfig(level=logging.WARNING, format="%(asctime)s [%(levelname)s] %(message)s")
     try:
@@ -216,4 +326,6 @@ def _demo() -> int:
 
 
 if __name__ == "__main__":
+    if "--stats" in sys.argv[1:]:
+        sys.exit(_stats_cli())
     sys.exit(_demo())

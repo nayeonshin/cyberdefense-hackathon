@@ -25,6 +25,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 TEST_TABLE = "incoming_threats_test_" + uuid.uuid4().hex
+TEST_RUNS_TABLE = "ingest_runs_test_" + uuid.uuid4().hex
 
 import ingest  # noqa: E402
 import threatfeed  # noqa: E402
@@ -268,9 +269,49 @@ def db_checks() -> None:
                            "SCANNED", domain="two.example", event_id="t-7")
         expect_value_error("empty domain", threatfeed.update_takedown_status,
                            "SCANNED", domain="")
+
+        print(f"\n9. ingest_runs telemetry + get_feed_stats (isolated table {TEST_RUNS_TABLE})")
+        client.command(f"DROP TABLE IF EXISTS {TEST_RUNS_TABLE}")
+        check(ingest.runs_table_name() == TEST_RUNS_TABLE, f"RUNS_TABLE resolves to {TEST_RUNS_TABLE}")
+        check(threatfeed.get_feed_stats()["recent_runs"] == [],
+              "no runs table yet -> recent_runs == []")
+        ingest.record_run_stats(client, {
+            "urlhaus": {"fetched": 20, "mapped": 19, "new": 7, "duplicates": 12,
+                        "error": "", "duration_ms": 123},
+            "threatfox": {"fetched": 0, "mapped": 0, "new": 0, "duplicates": 0,
+                          "error": "boom", "duration_ms": 45},
+        })
+        cols = [r[0] for r in client.query(f"DESCRIBE TABLE {TEST_RUNS_TABLE}").result_rows]
+        check(cols == ingest.RUN_COLUMN_NAMES, f"ingest_runs columns as specified: {cols}")
+        check(client.query(f"SELECT count() FROM {TEST_RUNS_TABLE}").first_row[0] == 2,
+              "2 run rows written")
+        stats = threatfeed.get_feed_stats()
+        check(set(stats) == {"by_feed", "by_threat_type", "by_status", "recent_runs"},
+              "get_feed_stats keys")
+        check(sum(r["rows"] for r in stats["by_feed"]) == len(SYNTHETIC), "by_feed rows total")
+        check({r["takedown_status"]: r["rows"] for r in stats["by_status"]}
+              == {"TAKEN_DOWN": 3, "SCANNED": 1, "PENDING": 3}, f"by_status: {stats['by_status']}")
+        check({r["threat_type"]: r["rows"] for r in stats["by_threat_type"]}
+              == {"malware_download": 5, "phishing": 2}, "by_threat_type counts")
+        runs = {r["feed_source"]: r for r in stats["recent_runs"]}
+        check(runs["urlhaus"]["inserted"] == 7 and runs["urlhaus"]["duplicates"] == 12
+              and runs["threatfox"]["error"] == "boom" and runs["urlhaus"]["duration_ms"] == 123,
+              "recent_runs values round-trip")
+        check(len(threatfeed.get_feed_stats(1)["recent_runs"]) == 1, "recent limit honoured")
+        expect_value_error("get_feed_stats(0)", threatfeed.get_feed_stats, 0)
+        # A broken stats write must warn, never raise.
+        class _Broken:
+            def command(self, *a, **k): raise RuntimeError("down")
+        try:
+            ingest.record_run_stats(_Broken(), {"urlhaus": {"fetched": 0, "mapped": 0, "new": 0,
+                                                            "duplicates": 0, "error": ""}})
+            check(True, "record_run_stats swallows write failures")
+        except Exception as exc:  # noqa: BLE001
+            check(False, f"record_run_stats raised {exc!r}")
     finally:
+        client.command(f"DROP TABLE IF EXISTS {TEST_RUNS_TABLE}")
         client.command(f"DROP TABLE IF EXISTS {TEST_TABLE}")
-        print(f"\n(dropped {TEST_TABLE})")
+        print(f"\n(dropped {TEST_TABLE}, {TEST_RUNS_TABLE})")
         client.close()
 
 
@@ -298,7 +339,9 @@ def run() -> int:
     passes = 0
     failures.clear()
     previous = os.environ.get("THREATS_TABLE")
+    previous_runs = os.environ.get("RUNS_TABLE")
     os.environ["THREATS_TABLE"] = TEST_TABLE
+    os.environ["RUNS_TABLE"] = TEST_RUNS_TABLE
     try:
         return _run()
     finally:
@@ -306,6 +349,10 @@ def run() -> int:
             os.environ.pop("THREATS_TABLE", None)
         else:
             os.environ["THREATS_TABLE"] = previous
+        if previous_runs is None:
+            os.environ.pop("RUNS_TABLE", None)
+        else:
+            os.environ["RUNS_TABLE"] = previous_runs
 
 
 def test_smoke() -> None:  # pytest entrypoint

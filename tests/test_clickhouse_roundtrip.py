@@ -125,6 +125,38 @@ def test_domain_url_limit_does_not_hide_pending_event_ids(database):
     assert threatfeed.get_pending_targets(5)[0]["url_count"] == 11
 
 
+def test_new_feeds_deduplicate_writeback_and_populate_graphs(database):
+    seen = datetime(2026, 10, 9, 12, tzinfo=timezone.utc)
+    url = "https://demo.example/login"
+    rows = ingest.map_openphish([{"url": url, "fetched_at": seen}])
+    rows += ingest.map_threatfox([
+        dict(id="demo-c2", ioc="c2.example", ioc_type="domain", threat_type="botnet_cc",
+             first_seen="2026-10-09 12:00:00 UTC"),
+        dict(id="demo-payload", ioc=url, ioc_type="url", threat_type="payload_delivery",
+             first_seen="2026-10-09 12:00:00 UTC"),
+    ])
+    assert ingest.insert_rows(database, rows) == 3
+    fresh, duplicates = ingest.drop_duplicates(database, rows)
+    assert fresh == [] and duplicates == 3
+    pending = store.get_pending_events(client=database)
+    assert len(pending) == 3 and all(event["listed_on_feed"] for event in pending)
+
+    def scanner(events, listed_on_feed):
+        assert listed_on_feed == [True] * 3
+        return [({**event, "semgrep_detected": False, "confidence_score": 0.15,
+                  "evidence": "offline scanner fixture", "action_status": "REJECTED"}, [])
+                for event in events]
+
+    assert worker.run_once(database, scanner=scanner)["by_status"] == {"REJECTED": 3}
+    assert worker.run_once(database, scanner=scanner)["total"] == 0
+    assert database.query("SELECT count() FROM incoming_threats WHERE takedown_status='SCANNED'").first_row[0] == 3
+    data = telemetry.graph_data(database)
+    assert {r["domain"]: r["url_count"] for r in data["domain_activity"]} == {"demo.example": 1, "c2.example": 1}
+    assert {r["threat_type"]: r["event_count"] for r in data["threat_types"]} == {
+        "phishing": 1, "c2": 1, "malware_download": 1}
+    assert data["scanner_verdicts"] == [{"action_status": "REJECTED", "event_count": 3}]
+
+
 def test_status_failure_recovers_without_rescanning_a_persisted_verdict(database, demo_server, monkeypatch):
     seed(database, demo_server)
     calls = []

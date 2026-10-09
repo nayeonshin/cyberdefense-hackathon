@@ -95,7 +95,7 @@ def get_pending_events(limit: int = 25, *, client=None) -> list[dict]:
         "timestamp": _utc(seen).isoformat().replace("+00:00", "Z"),
         "semgrep_detected": None, "confidence_score": None, "evidence": "",
         "action_status": "PENDING", "proof_url": "",
-        "listed_on_feed": source in {"urlhaus", "openphish"},
+        "listed_on_feed": source in {"urlhaus", "openphish", "threatfox"},
     } for event_id, url, seen, source in rows]
 
 
