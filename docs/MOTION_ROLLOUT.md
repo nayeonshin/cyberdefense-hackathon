@@ -24,9 +24,27 @@ workers, exact event contract, and proof validation are unchanged.
 Local browser checks cover desktop and 390px layouts, persistent pause and component identity across
 two-second updates, negative/pending deep links, keyboard table selection, and server disconnect.
 The disconnect correctly shows “Live updates unavailable” and “Motion stopped.” No frontend errors
-were observed. Focused presentation/regression tests: 36 passed.
+were observed. Focused presentation/regression tests: 36 passed. The full local and Linux CI suites
+both passed all **78 tests**. [CI run 38000700100](https://github.com/nayeonshin/cyberdefense-hackathon/actions/runs/38000700100)
+built and published the Linux/AMD64 image, executed an actual ClickHouse/Semgrep/Actor run in **12.279
+seconds**, and passed persistent-volume restart, database outage/recovery, and forced worker-failure
+checks. The local Docker engine was unavailable, so container validation ran in Linux CI.
 
 The rollout updates the existing deployment 1791578237742, retaining run `akash-controlled-001` and
 its persistent volume. Immediate rollback image:
 `ghcr.io/nayeonshin/cyberdefense-hackathon:94e119886ab8f82e24148ea19bb4d69421f0de57`.
-Final CI, deployed image, and receipt-preservation results are recorded after verification.
+Published image: `ghcr.io/nayeonshin/cyberdefense-hackathon:495ea49ea4f1a1a3ed5aa31fdeba78dffb38e434`.
+Digest: `sha256:f0780a7535a0789a717ccbafd618088576efb88bcf9ddbbb23e4110f8ed54533`.
+The registry manifest was readable anonymously. The image is running on the existing
+[public dashboard](https://rlts1sj4jhcur9q89cjbfn8omk.ingress.h6i-dedicated.eu-se-1.digitalfrontier.so/).
+The brief single-container replacement returned HTTP 503 before reconnecting normally. Desktop and
+mobile reconnects loaded the animation, escaped Semgrep evidence, receipt details and live updates.
+The component instance remained stable across refreshes and saved-evidence playback returned to the
+recorded confirmation without dispatching. The ledger still contains **3 receipts / 1 SENT** and its
+SHA-256 remains `3040f630e6fbc91d530967214e40514659e63b8b41817353b0e553c5526fb6ce`.
+Worker restart: `2026-10-09T22:46:45.707219Z`; fresh HTTP 410 check: `2026-10-09T22:47:22.380248Z`.
+The original controlled run duration remains **15.054 seconds**. The existing sponsor-funded lease,
+run ID, resources, and persistent volume were retained. No new paid resources were created.
+
+Cloud data still uses files; the ClickHouse execution cited above is a separate CI environment.
+Guild AI evidence, final recording, team details, prize selections and final submission remain pending.
