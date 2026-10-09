@@ -1,10 +1,12 @@
 """Join the stages: pending rows from ingestion, a verdict from the brain, then the ladder.
 
     python -m actor.intake                    one pass, dry run
-    python -m actor.intake --live --loop      keep following the table
+    python -m actor.intake --live --loop      keep following the verdict table
+    python -m actor.intake --scan --live      scan from here (no separate scanner worker)
 
-Member 1 owns `incoming_threats`, Member 2 owns the scan. This module reads the first,
-calls the second, hands verified threats to the Actor and writes the outcome back.
+Member 1 owns `incoming_threats`. Member 2's worker scans pending rows and appends its
+verdict to `events`. This module acts on the VERIFIED ones and appends the outcome to the
+same event: PUBLISHED_TAKEDOWN with a proof link, WITHHELD, later TAKEN_DOWN.
 """
 import argparse
 import json
@@ -24,7 +26,7 @@ from .recheck import recheck_once
 
 # A listing on one of these curated feeds is the independent second source that the
 # Actor requires before it mails a hosting provider.
-TRUSTED_FEEDS = {"urlhaus"}
+TRUSTED_FEEDS = {"urlhaus", "openphish", "threatfox"}
 THREAT_TYPES = {"malware_download": "malware"}
 MAX_BATCH = 25                     # the brain's /scan/batch limit
 
@@ -93,6 +95,74 @@ def set_status(client, status: str, event_ids: list) -> None:
         f"ALTER TABLE {events_table()} UPDATE takedown_status = '{status}' "
         "WHERE event_id IN {ids:Array(String)} SETTINGS mutations_sync = 1",
         parameters={"ids": list(event_ids)})
+
+
+def verdicts_table() -> str:
+    name = config.get("VERDICTS_TABLE", "events")
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]{0,80}", name):
+        raise ValueError("VERDICTS_TABLE is not a plain table name")
+    return name
+
+
+EVENT_COLUMNS = ["event_id", "target_url", "timestamp", "semgrep_detected", "confidence_score",
+                 "evidence", "action_status", "proof_url"]
+
+
+def fetch_verified(client, limit: int = MAX_BATCH) -> list:
+    """Verdicts Member 2's worker marked VERIFIED and nobody has acted on yet."""
+    query = (
+        "SELECT e.event_id AS event_id, e.target_url AS target_url, e.timestamp AS event_time, "
+        "e.semgrep_detected AS semgrep_detected, e.confidence_score AS confidence_score, "
+        "e.evidence AS evidence, t.threat_type AS threat_type, t.feed_source AS feed_source "
+        f"FROM (SELECT * FROM {verdicts_table()} FINAL WHERE action_status = 'VERIFIED') AS e "
+        "LEFT JOIN (SELECT event_id, any(threat_type) AS threat_type, any(feed_source) AS feed_source "
+        f"FROM {events_table()} GROUP BY event_id) AS t USING (event_id) "
+        f"ORDER BY e.timestamp LIMIT {int(limit)}")
+    return list(client.query(query).named_results())
+
+
+def write_back(client, row: dict, status: str, proof_url: str) -> None:
+    """Append the Actor's version of the event; the newest version is the current one."""
+    when = row.get("event_time")
+    if not isinstance(when, datetime):
+        when = datetime.now(timezone.utc)
+    client.insert(verdicts_table(), [[
+        str(row["event_id"]), str(row["target_url"]), when,
+        bool(row.get("semgrep_detected")), row.get("confidence_score"), str(row.get("evidence") or ""),
+        status, proof_url]], column_names=EVENT_COLUMNS)
+
+
+def run_verified(client, live: bool = False, ledger: Ledger = None, policy: dict = None,
+                 skip: set = None) -> list:
+    """Act on the scanner's VERIFIED verdicts and record the outcome on the same event."""
+    ledger = ledger or Ledger()
+    policy = policy or policy_module.load()
+    receipts = []
+    for row in fetch_verified(client):
+        event_id = str(row["event_id"])
+        if skip is not None and event_id in skip:
+            continue
+        threat = str(row.get("threat_type") or "phishing")
+        verdict = {
+            "event_id": event_id, "target_url": row["target_url"],
+            "timestamp": str(row.get("event_time") or ""),
+            "semgrep_detected": row.get("semgrep_detected") is True or row.get("semgrep_detected") == 1,
+            "confidence_score": row.get("confidence_score"),
+            "evidence": row.get("evidence") or "",
+            "threat_type": THREAT_TYPES.get(threat, threat),
+            "corroborated": str(row.get("feed_source") or "").lower() in TRUSTED_FEEDS,
+        }
+        mine = dispatch(verdict, live=live, ledger=ledger, policy=policy)
+        receipts += mine
+        if skip is not None:
+            skip.add(event_id)
+        if not live:
+            continue
+        done = [r for r in mine if r.status in DONE_STATUSES and not r.dry_run]
+        public = [r.proof_url for r in done if r.proof_url.startswith("http") and "localhost" not in r.proof_url]
+        proof = (public or [r.proof_url for r in done if r.proof_url] or [""])[0]
+        write_back(client, row, "PUBLISHED_TAKEDOWN" if done else "WITHHELD", proof)
+    return receipts
 
 
 def scan(events: list) -> list:
@@ -198,12 +268,23 @@ def run_once(client, live: bool = False, ledger: Ledger = None, policy: dict = N
     return receipts
 
 
-def follow_up(client, live: bool = False, ledger: Ledger = None, policy: dict = None) -> list:
+def follow_up(client, live: bool = False, ledger: Ledger = None, policy: dict = None,
+              verdict_rows: bool = False) -> list:
     """Recheck acted-on targets; confirmed takedowns are written back as TAKEN_DOWN."""
     receipts = recheck_once(ledger, policy, live=live)
+    confirmed = [r for r in receipts if r.status == "CONFIRMED_DOWN"]
     if live:
-        set_status(client, "TAKEN_DOWN",
-                   [r.event_id for r in receipts if r.status == "CONFIRMED_DOWN"])
+        set_status(client, "TAKEN_DOWN", [r.event_id for r in confirmed])
+        if verdict_rows:
+            for r in confirmed:
+                current = list(client.query(
+                    "SELECT event_id, target_url, timestamp AS event_time, semgrep_detected, "
+                    f"confidence_score, evidence, proof_url FROM {verdicts_table()} FINAL "
+                    "WHERE event_id = {id:String}", parameters={"id": r.event_id}).named_results())
+                row = current[0] if current and current[0].get("event_id") == r.event_id else {
+                    "event_id": r.event_id, "target_url": r.target_url, "semgrep_detected": True,
+                    "evidence": r.detail}
+                write_back(client, row, "TAKEN_DOWN", row.get("proof_url") or "")
     return receipts
 
 
@@ -213,6 +294,8 @@ def main() -> None:
     parser.add_argument("--loop", action="store_true", help="keep following the table")
     parser.add_argument("--interval", type=int, default=15)
     parser.add_argument("--rows", help="JSON file of rows to use instead of ClickHouse")
+    parser.add_argument("--scan", action="store_true",
+                        help="call the scanner from here instead of reading Member 2's verdict table")
     args = parser.parse_args()
 
     if args.rows:
@@ -226,8 +309,10 @@ def main() -> None:
     ledger, policy, seen = Ledger(), policy_module.load(), set()
     print("LIVE: enabled channels will send" if args.live else "DRY RUN: nothing is sent")
     while True:
-        receipts = run_once(client, args.live, ledger, policy, skip=None if args.live else seen)
-        receipts += follow_up(client, args.live, ledger, policy)
+        own_scan = args.scan or bool(args.rows)
+        step = run_once if own_scan else run_verified
+        receipts = step(client, args.live, ledger, policy, skip=None if args.live else seen)
+        receipts += follow_up(client, args.live, ledger, policy, verdict_rows=not own_scan)
         print_receipts(receipts) if receipts else print("nothing pending")
         if args.rows:
             for row in client.rows:

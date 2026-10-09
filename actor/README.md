@@ -2,7 +2,7 @@
 
 ![Actor bench drawing sheet: verdict stamp, scenario matrix, acceptance table and revision history](bench/scorecard.svg)
 
-The sheet is redrawn by `python -m actor.bench`. It runs 101 labelled scenarios through the
+The sheet is redrawn by `python -m actor.bench`. It runs 109 labelled scenarios through the
 real dispatcher with every outside channel replaced by a recorder.
 
 - **View A** shows every scenario against every action: a filled square was sent as required,
@@ -57,22 +57,24 @@ Netcraft's development endpoint, the public feed repository, the controlled targ
 mail sink. Results land in `bench/live.json`, in the ClickHouse table `live_checks` and on
 sheet 2 of `bench/scorecard.html`.
 
-## The whole pipeline in one command
+## The whole pipeline
 
-`actor/intake.py` joins the three stages: it reads `PENDING` rows from Member 1's
-`incoming_threats`, asks Member 2's brain for a verdict (over HTTP when `BRAIN_URL` is set,
-otherwise in process), runs the ladder for `VERIFIED` rows and writes the outcome back.
+Three processes follow one ClickHouse database:
 
 ```bash
-python -m actor.intake --live --loop                             # against ClickHouse
-python -m actor.intake --rows fixtures/pipeline_rows.json --live # without a database
+python ingest.py --daemon              # Member 1: feeds into incoming_threats
+python -m brain.worker                 # Member 2: scans pending rows, appends verdicts to events
+python -m actor.intake --live --loop   # Member 3: acts on VERIFIED verdicts
 ```
 
-Row status after a pass: `REPORTED` (something went out), `SCANNED` (nothing to do),
-`TAKEN_DOWN` (two failed checks confirmed it). Rows stay `PENDING` when the brain is down or
-answers for the wrong event. Verdicts are stored in a `verdicts` table next to `actions`.
-A listing on URLhaus counts as the independent second source the Actor needs before it mails
-a host.
+The Actor appends its outcome to the same event in `events`: `PUBLISHED_TAKEDOWN` with a
+proof link when something went out, `WITHHELD` when the rules of engagement refused, and
+`TAKEN_DOWN` once two failed checks confirm it. `incoming_threats.takedown_status` is set to
+`TAKEN_DOWN` at that point as well. A listing on URLhaus, OpenPhish or ThreatFox counts as
+the independent second source the Actor needs before it mails a host.
+
+Without a separate scanner worker, `python -m actor.intake --scan --live` calls the scanner
+itself, and `--rows fixtures/pipeline_rows.json` runs the same thing without a database.
 
 Local run with the real scanner: `SEMGREP_BIN` pointing at Semgrep, `BRAIN_ALLOW_PRIVATE=1`,
 and `SITE_DIR=demo-sites/phish python -m actor.mock_registrar_server` serving Member 2's demo

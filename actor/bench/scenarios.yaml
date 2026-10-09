@@ -734,3 +734,70 @@
     - recheck: {up: false}
     - dispatch: {verdict: {event_id: evt-controlled-rerun-2, target_url: "http://localhost:8099/site/", controlled: true}}
   expect: {mock_registrar: 2, notify_host: 2, confirm: 1}
+
+# ---------------------------------------------------------------- verdict table (Member 2's worker)
+# Rows as the scanner worker leaves them in `events`: VERIFIED at 0.96 unless stated.
+- id: verdicts-verified
+  group: pipeline
+  title: A VERIFIED verdict from the scanner's table gets the full ladder and a proof link
+  steps:
+    - verdicts: {}
+  expect: full
+  checks: {event_status: {verdicts-verified-1: PUBLISHED_TAKEDOWN}}
+
+- id: verdicts-openphish
+  group: pipeline
+  title: A listing on OpenPhish also counts as the second source
+  steps:
+    - verdicts: {rows: [{feed_source: openphish}]}
+  expect: full
+
+- id: verdicts-unknown-feed
+  group: pipeline
+  title: A verdict for a row from no curated feed does not mail the host
+  steps:
+    - verdicts: {rows: [{feed_source: ""}]}
+  expect: report
+
+- id: verdicts-second-pass
+  group: pipeline
+  title: A second pass over the verdict table sends nothing twice
+  steps:
+    - verdicts: {}
+    - verdicts: {}
+  expect: full
+
+- id: verdicts-withheld
+  group: pipeline
+  title: A verified verdict the policy refuses is marked WITHHELD, not left pending
+  enrichment: private
+  steps:
+    - verdicts: {rows: [{target_url: "http://10.0.0.9/x.sh"}]}
+  expect: none
+  checks: {event_status: {verdicts-withheld-1: WITHHELD}}
+
+- id: verdicts-null-confidence
+  group: pipeline
+  title: A verdict with no confidence value is refused without stopping the batch
+  enrichment: unique
+  steps:
+    - verdicts: {rows: [{confidence_score: null}, {}]}
+  expect: full
+  checks: {event_status: {verdicts-null-confidence-1: WITHHELD, verdicts-null-confidence-2: PUBLISHED_TAKEDOWN}}
+
+- id: verdicts-integer-flag
+  group: pipeline
+  title: ClickHouse returns the detection flag as 1 instead of true
+  steps:
+    - verdicts: {rows: [{semgrep_detected: 1}]}
+  expect: full
+
+- id: verdicts-takedown
+  group: pipeline
+  title: A confirmed takedown is written to the event as TAKEN_DOWN
+  steps:
+    - verdicts: {}
+    - followup: {up: false, verdict_rows: true}
+    - followup: {up: false, verdict_rows: true}
+  expect: {feed: 1, urlscan: 1, netcraft: 1, abuseipdb: 1, notify_host: 1, confirm: 1}
+  checks: {event_status: {verdicts-takedown-1: TAKEN_DOWN}}

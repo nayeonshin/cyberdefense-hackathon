@@ -173,7 +173,10 @@ class FakeClickHouse:
         self.rows, self.inserts = rows, []
 
     def query(self, sql, parameters=None):
-        pending = [dict(r) for r in self.rows if r["takedown_status"] == "PENDING"]
+        if "FINAL" in sql:      # the scanner's verdict table
+            pending = [dict(r) for r in self.rows if r.get("action_status") == "VERIFIED"]
+        else:
+            pending = [dict(r) for r in self.rows if r["takedown_status"] == "PENDING"]
         return types.SimpleNamespace(named_results=lambda: pending)
 
     def command(self, sql, parameters=None):
@@ -185,6 +188,12 @@ class FakeClickHouse:
 
     def insert(self, table, data, column_names=None):
         self.inserts.append(table)
+        if table == "events":
+            for values in data:
+                new = dict(zip(column_names, values))
+                for row in self.rows:
+                    if row["event_id"] == new["event_id"]:
+                        row["action_status"], row["proof_url"] = new["action_status"], new["proof_url"]
 
 
 def _rows(sc: dict, args: dict) -> list:
@@ -194,6 +203,21 @@ def _rows(sc: dict, args: dict) -> list:
                "target_url": f"https://r{i}.{sc['id']}.bad.example/login",
                "timestamp": "2026-10-09 18:00:00", "threat_type": "phishing",
                "feed_source": "urlhaus", "takedown_status": "PENDING"}
+        row.update(overrides or {})
+        rows.append(row)
+    return rows
+
+
+def _verdict_rows(sc: dict, args: dict) -> list:
+    """Rows as Member 2's worker leaves them in the events table."""
+    rows = []
+    for i, overrides in enumerate(args.get("rows") or [{}], start=1):
+        row = {"event_id": f"{sc['id']}-{i}",
+               "target_url": f"https://r{i}.{sc['id']}.bad.example/login",
+               "event_time": "2026-10-09 18:00:00", "semgrep_detected": True,
+               "confidence_score": 0.96, "action_status": "VERIFIED", "proof_url": "",
+               "evidence": "Semgrep rule `fake-login-form` matched index.html line 12",
+               "threat_type": "phishing", "feed_source": "urlhaus", "takedown_status": "SCANNED"}
         row.update(overrides or {})
         rows.append(row)
     return rows
@@ -362,9 +386,15 @@ def run_scenario(sc: dict, mutant: dict = None) -> dict:
                         hosts.update(_host_of(row) for row in table.rows)
                         with mock.patch("actor.intake.scan", _fake_brain(args)):
                             intake.run_once(table, live=True, ledger=ledger, policy=policy)
+                    elif kind == "verdicts":
+                        if table is None:
+                            table = FakeClickHouse(_verdict_rows(sc, args))
+                        hosts.update(_host_of(row) for row in table.rows)
+                        intake.run_verified(table, live=True, ledger=ledger, policy=policy)
                     elif kind == "followup":
                         wire.up = bool(args.get("up", True))
-                        intake.follow_up(table, live=True, ledger=ledger, policy=policy)
+                        intake.follow_up(table, live=True, ledger=ledger, policy=policy,
+                                         verdict_rows=bool(args.get("verdict_rows")))
                     else:
                         wire.up = bool(args.get("up", True))
                         recheck_once(ledger, policy, live=True)
@@ -434,6 +464,11 @@ def run_scenario(sc: dict, mutant: dict = None) -> dict:
     for domain in checks.get("blocklist_has", []):
         if domain not in blocklist:
             problems.append(f"blocklist should contain {domain}")
+    for event_id, wanted in (checks.get("event_status") or {}).items():
+        actual = next((r.get("action_status") for r in (table.rows if table else [])
+                       if r["event_id"] == event_id), "missing")
+        if actual != wanted:
+            problems.append(f"event {event_id} should be {wanted}, is {actual}")
     for event_id, wanted in (checks.get("status") or {}).items():
         actual = next((r["takedown_status"] for r in (table.rows if table else [])
                        if r["event_id"] == event_id), "missing")
