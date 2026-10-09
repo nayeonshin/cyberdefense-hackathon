@@ -39,8 +39,11 @@ def main():
                     exit_code, stopping = 1, True
                     break
             if not stopping:
-                write_json(settings.run_dir / "supervisor.json", {"status": "running", "processes": list(children),
-                    "updated_at": now_iso(), "missing": [n for n in ("ingestion", "scanner") if n not in children]})
+                try:
+                    write_json(settings.run_dir / "supervisor.json", {"status": "running", "processes": list(children),
+                        "updated_at": now_iso(), "missing": [n for n in ("ingestion", "scanner") if n not in children]})
+                except PermissionError:
+                    print("Supervisor heartbeat temporarily locked; services continue running.", flush=True)
                 time.sleep(1)
     finally:
         for child in children.values():

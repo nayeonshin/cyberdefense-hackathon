@@ -146,7 +146,10 @@ def main():
                     # Never persist exception messages: drivers may include credentials or queries.
                     status = {"status": "degraded", "detail": f"{type(exc).__name__}: integration unavailable; see local service logs.",
                               "updated_at": now_iso(), "run_id": settings.run_id, "mode": settings.mode, "source": settings.source}
-                    write_json(settings.run_dir / "heartbeat.json", status)
+                    try:
+                        write_json(settings.run_dir / "heartbeat.json", status)
+                    except PermissionError:
+                        print("Worker heartbeat temporarily locked; next cycle will retry.", flush=True)
                     print(f"worker: {type(exc).__name__}; retrying without fixture fallback", flush=True)
                 stop.wait(settings.poll_seconds)
         finally:

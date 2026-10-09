@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import time
 from pathlib import Path
 
 
@@ -19,7 +20,16 @@ def write_json(path, value):
             json.dump(value, handle, indent=2, default=str)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        # Windows readers / antivirus can briefly hold a destination without
+        # FILE_SHARE_DELETE. Keep the old valid file while waiting for the lock.
+        for attempt in range(10):
+            try:
+                os.replace(temporary, path)
+                break
+            except PermissionError:
+                if attempt == 9:
+                    raise
+                time.sleep(min(0.02 * 2 ** attempt, 0.4))
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)

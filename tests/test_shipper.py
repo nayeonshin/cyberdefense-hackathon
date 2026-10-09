@@ -178,3 +178,21 @@ def test_dashboard_reruns_are_read_only(tmp_path, monkeypatch):
     app.run()
     assert not app.exception
     fake_dispatch.assert_not_called()
+
+
+def test_atomic_storage_retries_windows_reader_lock(tmp_path, monkeypatch):
+    import os
+    real_replace = os.replace
+    calls = []
+    def transient_lock(source, destination):
+        calls.append(destination)
+        if len(calls) < 3:
+            raise PermissionError("Windows reader holds the destination")
+        return real_replace(source, destination)
+    monkeypatch.setattr("shipper.storage.os.replace", transient_lock)
+    monkeypatch.setattr("shipper.storage.time.sleep", lambda _: None)
+    target = tmp_path / "heartbeat.json"
+    write_json(target, {"status": "running"})
+    assert read_json(target)["status"] == "running"
+    assert len(calls) == 3
+    assert not list(tmp_path.glob("*.tmp"))
