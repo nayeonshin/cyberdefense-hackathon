@@ -6,7 +6,9 @@ Live URLhaus threat feed → ClickHouse → `threatfeed.get_pending_targets()` f
 |---|---|
 | `ingest.py` | Polls URLhaus `/v1/urls/recent/`, maps records, dedups on `event_id`, inserts into `incoming_threats` |
 | `threatfeed.py` | Member 2's interface: `get_pending_targets()`, `update_takedown_status()` (contract: `INTERFACE.md`) |
+| `bench.py` | Offline **capacity** benchmark (`ingest.py --bench`): synthetic rows through the real dedup + insert path, isolated table |
 | `tests/smoke_test.py` | End-to-end checks on an isolated table (`incoming_threats_test`), never touches live data |
+| `tests/volume_test.py` | Velocity/volume checks: throughput floor, query latency at volume, live-rate maths |
 | `check_setup.py` | Read-only preflight: deps, ClickHouse, Auth-Key, live payload, schema |
 | `MEMBER1_PLAN.md` | Spec, decisions D1–D5, acceptance results |
 
@@ -54,6 +56,20 @@ after a success. Every cycle logs a heartbeat (`cycle`, due feeds, total rows), 
 attempt is recorded in the `ingest_runs` table (not written in `--dry-run`; a failed stats write only
 logs a warning). `--max-cycles N` stops the daemon after N cycles.
 
+## Velocity & volume
+
+Two different numbers — keep them apart (details: `MEMBER1_PLAN.md` §10).
+
+```bash
+.venv/bin/python ingest.py --bench                              # CAPACITY: 100k synthetic rows (~100k rows/s)
+.venv/bin/python ingest.py --bench --rows 1000000 --batch 50000 # 1M rows (~200k rows/s, ~5 s)
+.venv/bin/python threatfeed.py --stats                          # LIVE FEED RATE: "live feed throughput" section
+```
+
+`--bench` never contacts a feed, writes only to `incoming_threats_bench` (dropped afterwards unless
+`--keep`), refuses the live table, and writes nothing to `ingest_runs`. It measures what the store
+can absorb, **not** how fast the feeds emit; the live rate comes from `ingest_runs`.
+
 Exit codes: `0` ok, `1` runtime error (HTTP/DB), `2` bad arguments,
 `3` the feed returned records but none could be mapped (parser regression — never reported as success).
 
@@ -75,5 +91,6 @@ update_takedown_status("TAKEN_DOWN", domain="evil.example")   # visible immediat
 
 ```bash
 .venv/bin/python tests/smoke_test.py               # ends with "ALL CHECKS PASSED"
+.venv/bin/python tests/volume_test.py              # ends with "ALL VOLUME CHECKS PASSED"
 .venv/bin/python ingest.py --self-test             # parser-only, no network/DB
 ```

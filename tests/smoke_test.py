@@ -289,7 +289,8 @@ def db_checks() -> None:
         check(client.query(f"SELECT count() FROM {TEST_RUNS_TABLE}").first_row[0] == 2,
               "2 run rows written")
         stats = threatfeed.get_feed_stats()
-        check(set(stats) == {"by_feed", "by_threat_type", "by_status", "recent_runs"},
+        check(set(stats) == {"by_feed", "by_threat_type", "by_status", "recent_runs",
+                             "throughput"},
               "get_feed_stats keys")
         check(sum(r["rows"] for r in stats["by_feed"]) == len(SYNTHETIC), "by_feed rows total")
         check({r["takedown_status"]: r["rows"] for r in stats["by_status"]}

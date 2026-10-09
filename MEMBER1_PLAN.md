@@ -21,7 +21,7 @@ This document is the working spec for Member 1. It separates:
 | 1 | ClickHouse instance (local Docker or Cloud) | **[DONE]** container `threat-orchestrator-db`, server version `26.9.14.10`, timezone `UTC`, HTTP on `localhost:8123` (A1). Connection is env-driven, so ClickHouse Cloud is a config change (§2.1). |
 | 2 | Python ingestion script polling live threat feeds | **[DONE]** `ingest.py` polls the live authenticated `/v1/urls/recent/` endpoint (one-shot, or `--interval ≥300`): A2 maps `50/50`, A3 inserts 50 rows. |
 | 3 | Schema: `timestamp, target_url, domain, ip_address, threat_type, takedown_status` | **[DONE]** all six brief columns present (A4); `timestamp` is `DateTime`. Rebuilt via `ingest.py --reset-schema`. |
-| 4 | Expose `get_pending_targets()` to Member 2 | **[DONE]** `threatfeed.py` (`get_pending_targets`, `update_takedown_status`), contract in `INTERFACE.md`, A5/A7 pass live and in `tests/smoke_test.py` (70/70). |
+| 4 | Expose `get_pending_targets()` to Member 2 | **[DONE]** `threatfeed.py` (`get_pending_targets`, `update_takedown_status`), contract in `INTERFACE.md`, A5/A7 pass live and in `tests/smoke_test.py` (82/82). |
 
 Optional extras from the brief (CT logs, simulated phishing list) are **not** implemented — see §8 step 7.
 
@@ -101,7 +101,7 @@ The old `"%Y-%m-%d %H:%M:%S"` could not parse that, so every record was skipped 
 
 **Fixed:** `parse_timestamp()` accepts the bare form, a trailing ` UTC`, ISO-8601 with `T`,
 a trailing `Z`, and numeric offsets; always returns a UTC-aware datetime; returns `None`
-for garbage. Covered by `ingest.py --self-test` (8/8) and `tests/smoke_test.py`.
+for garbage. Covered by `ingest.py --self-test` (32/32) and `tests/smoke_test.py`.
 
 **Fail-loud guard:** if records matching the `--threat-type` filter came back and *none* map,
 `ingest.py` logs an explicit error and exits **3**. A filter that legitimately matches nothing
@@ -187,7 +187,7 @@ Write-back: count matches, then
 `ALTER TABLE incoming_threats UPDATE takedown_status = {status:String} WHERE domain = {selector:String}`
 with `settings={"mutations_sync": 1}` (D5).
 
-`ORDER BY url_count DESC` is what makes it a *high-velocity* view: the domain with the most freshly reported URLs is the most active campaign, and the best takedown candidate.
+`ORDER BY url_count DESC` ranks by *activity*: the domain with the most freshly reported URLs is the most active campaign, and the best takedown candidate. (This is not "velocity"; ingest velocity is measured separately in §10.)
 
 ---
 
@@ -214,7 +214,7 @@ with `settings={"mutations_sync": 1}` (D5).
 | A5 | **PASS** — top 5 live: `tronzadorasnng.com` (7 URLs), `github.com` (3), `www.tmcksa.com` (2), `114.226.200.81` (2), `micstndasap.world` (2) |
 | A6 | **PASS** — second run: `Dedup: 0 new, 50 duplicates skipped`, `Done: 0 row(s) inserted` |
 | A7 | **PASS** — smoke test: `busy.example gone from pending IMMEDIATELY`; live: `update_takedown_status('TAKEN_DOWN', domain='tronzadorasnng.com') -> 7`, gone from the next call (then restored to `PENDING`) |
-| — | `tests/smoke_test.py`: **ALL CHECKS PASSED (70 checks)**; `check_setup.py`: **No blockers** |
+| — | `tests/smoke_test.py`: **ALL CHECKS PASSED (82 checks)**; `check_setup.py`: **No blockers** |
 | — | `--threat-type phishing --dry-run`: **0** matches in 1000 records (feed was 100 % `malware_download`) |
 
 **Caveat on A6:** `urls/recent/` churns slowly (≈1 new `id` per few minutes), so "0 new"
@@ -232,7 +232,7 @@ independently by the smoke test (re-insert of 7 known rows → 0 added).
 | 3 | `domain` / `ip_address` derivation (4.4, D3) | **[DONE]** `--resolve-dns` uses a 2 s timeout, never raises |
 | 4 | Dedup by `event_id` (4.3) | **[DONE]** |
 | 5 | `threatfeed.py` with `get_pending_targets()` + `update_takedown_status()` (§6) | **[DONE]** |
-| 6 | `tests/smoke_test.py` (replaces `/tmp/verify_ingest.py`), isolated table `incoming_threats_test` | **[DONE]** 70/70 |
+| 6 | `tests/smoke_test.py` (replaces `/tmp/verify_ingest.py`), isolated table `incoming_threats_test` | **[DONE]** 82/82 |
 | 6a | Optional polling loop `--interval SECONDS` (≥300) | **[DONE]** |
 | 7 | Optional: second feed (crt.sh CT log / simulated phishing list) behind `feed_source` | **[BACKLOG]** not started |
 | 8 | Commit to `feature/clickhouse-ingest` | **[DONE]** local commits, not pushed |
@@ -254,3 +254,36 @@ independently by the smoke test (re-insert of 7 known rows → 0 added).
 | Auth-Key / password in `clickhouse.env` | Credential leak | Gitignored, never logged; **rotate the Auth-Key after the hackathon** |
 | `ip_address` mostly empty for hostname-based URLs | Member 2 lacks an IP | By design (D3); `--resolve-dns` opt-in, or resolve in Member 2 |
 | `get_pending_targets` keeps a domain pending if *any* of its rows is PENDING | A partially actioned domain reappears | Intended: aggregates cover PENDING rows only; mark by `domain=` to clear it fully |
+| ~~`drop_duplicates` sent every id in one HTTP form field~~ | ~~Any poll over ~5k records crashed (`Field value too long`, ClickHouse's 128 KiB `http_max_field_value_size`)~~ | **[FIXED, found by `--bench`]** lookup chunked at 2000 ids; regression check in `tests/volume_test.py` §4 (25k ids) |
+| "High-velocity" read as a claim about the live feeds | Credibility with judges | **[ADDRESSED]** §10: capacity and live feed rate are measured and reported separately |
+
+---
+
+## 10. Velocity & volume — two numbers, never one
+
+"High-velocity" is a claim about **two different things**, and they are measured separately.
+
+| | **A. Capacity** (`ingest.py --bench`) | **B. Live feed rate** (`threatfeed.py --stats`) |
+|---|---|---|
+| Question | How fast can the ClickHouse layer absorb threat rows? | How fast do the real feeds actually deliver new threats? |
+| Data | Synthetic, deterministic (seeded), reserved `.invalid` domains / TEST-NET IPs, `feed_source='bench'` | Real URLhaus / OpenPhish / ThreatFox |
+| Path | The **real** `drop_duplicates` + `insert_rows`, one bulk insert per simulated poll, then the real `get_pending_targets()` | The daemon, end to end incl. network |
+| Where | Isolated `incoming_threats_bench`, dropped afterwards; nothing written to `ingest_runs` | `ingest_runs` telemetry → `get_feed_stats()["throughput"]` |
+| Tested by | `tests/volume_test.py` §2 (floor: ≥ 10k rows/s, query p50 ≤ 2 s; overridable) | `tests/volume_test.py` §3 (rate maths, cold-start excluded) |
+
+**A. Capacity — measured 2026-10-09, local Docker, ClickHouse 26.9.14.10, 16-core laptop:**
+
+| Volume | Batch | End-to-end (dedup + insert) | Insert-only | `get_pending_targets(5)` p50 at that volume | 1-batch redelivery rejected in |
+|---|---|---|---|---|---|
+| 100,000 rows | 10,000 | **~92–99k rows/s** (1.0 s) | ~145–150k rows/s | 25–29 ms | 35–41 ms |
+| 1,000,000 rows | 50,000 | **~206k rows/s** (4.9 s) | ~1.03M rows/s | 94 ms | 244 ms |
+
+All integrity checks pass at both sizes: exact row count, every `event_id` unique, a redelivered batch adds 0 rows, ranking by `url_count` desc. At 1M rows dedup is ~80 % of the time (it is a lookup against a growing table); a `ReplacingMergeTree` would remove it, but `ORDER BY timestamp` was mandated (§5), so it stays explicit.
+
+**B. Live feed rate — what the feeds really deliver (from `ingest_runs`):**
+
+- The pipeline *processes* URLhaus at ~730 records/s of working time (1000 records fetched, mapped and deduped in ~1.4 s per poll).
+- The feeds *emit* new threats slowly: URLhaus `urls/recent/` adds ≈1 new id every few minutes (§7 caveat on A6). A cold start can bring in 1000 records at once; after that, most of each poll is duplicates.
+- `steady_new_per_hour` reports the real emission rate once a daemon has run for ≥ 10 minutes; it excludes the cold-start backlog on purpose.
+
+**How to say it:** *"The live feeds are our real-time source; they deliver a few new IOCs per minute. The ClickHouse layer underneath is built for high velocity: ~100k threat rows/s through the same dedup + insert path, 1M rows in under 5 s, and Member 2's query still answers in under 100 ms at that volume."* Do not present number A as the feed rate.

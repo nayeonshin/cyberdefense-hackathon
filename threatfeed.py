@@ -49,6 +49,7 @@ VALID_STATUSES: frozenset[str] = frozenset(
     {"PENDING", "SCANNING", "SCANNED", "TAKEN_DOWN", "FALSE_POSITIVE"}
 )
 MAX_URLS_PER_TARGET = 10
+STEADY_RATE_MIN_SPAN_S = 600  # one daemon cycle; below this a per-hour rate is noise
 
 _env_loaded = False
 
@@ -204,6 +205,18 @@ def get_feed_stats(recent: int = 10) -> dict[str, Any]:
         recent_runs   list[{run_ts, feed_source, fetched, inserted, duplicates,
                       error, duration_ms}]  newest first, at most `recent`;
                       [] when the ingest_runs table does not exist yet.
+        throughput    list[{feed_source, runs, failed_runs, fetched, inserted,
+                      duplicates, busy_s, span_s, processed_per_s,
+                      steady_new_per_hour}]  LIVE feed rates from ingest_runs,
+                      inserted desc; [] when the table does not exist yet.
+                      * processed_per_s: records fetched+mapped+deduped per second
+                        of pipeline time (fetched / busy_s).
+                      * steady_new_per_hour: genuinely new rows per hour of wall
+                        clock between the first and last run, EXCLUDING the first
+                        run's cold-start backlog -- i.e. the feed's real emission
+                        rate. None until a feed's runs span at least
+                        STEADY_RATE_MIN_SPAN_S (shorter windows say nothing).
+                      Synthetic `--bench` volume never appears here.
 
     Raises ValueError when `recent` is not an int >= 1.
     """
@@ -243,8 +256,43 @@ def get_feed_stats(recent: int = 10) -> dict[str, Any]:
             if exists
             else []
         )
+        throughput_rows = (
+            client.query(
+                f"SELECT feed_source, count(), countIf(error != ''), "
+                f"sum(fetched), sum(inserted), sum(duplicates), sum(duration_ms), "
+                f"toUnixTimestamp(max(run_ts)) - toUnixTimestamp(min(run_ts)), "
+                f"argMin(inserted, run_ts) "
+                f"FROM {runs} GROUP BY feed_source "
+                f"ORDER BY sum(inserted) DESC, feed_source"
+            ).result_rows
+            if exists
+            else []
+        )
     finally:
         client.close()
+
+    throughput: list[dict[str, Any]] = []
+    for feed, n, failed, fetched, inserted, dups, busy_ms, span, first_ins in throughput_rows:
+        busy_s = int(busy_ms) / 1000
+        span_s = int(span)
+        throughput.append(
+            {
+                "feed_source": feed,
+                "runs": int(n),
+                "failed_runs": int(failed),
+                "fetched": int(fetched),
+                "inserted": int(inserted),
+                "duplicates": int(dups),
+                "busy_s": round(busy_s, 3),
+                "span_s": span_s,
+                "processed_per_s": round(int(fetched) / busy_s, 1) if busy_s else None,
+                "steady_new_per_hour": (
+                    round((int(inserted) - int(first_ins)) * 3600 / span_s, 2)
+                    if span_s >= STEADY_RATE_MIN_SPAN_S
+                    else None
+                ),
+            }
+        )
 
     return {
         "by_feed": [
@@ -264,6 +312,7 @@ def get_feed_stats(recent: int = 10) -> dict[str, Any]:
             }
             for ts, feed, fetched, inserted, dups, err, ms in run_rows
         ],
+        "throughput": throughput,
     }
 
 
@@ -285,6 +334,18 @@ def _stats_cli() -> int:
     print("\nby_status")
     for r in stats["by_status"]:
         print(f"  {r['takedown_status']:<15} rows={r['rows']}")
+    print(f"\nlive feed throughput ({runs_table_name()}; real feeds only, no --bench data)")
+    if not stats["throughput"]:
+        print("  (none yet -- run ingest.py)")
+    for r in stats["throughput"]:
+        steady = r["steady_new_per_hour"]
+        print(
+            f"  {r['feed_source']:<10} runs={r['runs']:<4} failed={r['failed_runs']:<3} "
+            f"fetched={r['fetched']:<6} new={r['inserted']:<6} dups={r['duplicates']:<6} "
+            f"processed={r['processed_per_s'] if r['processed_per_s'] is not None else '-'}/s  "
+            f"steady_new={'n/a (<10 min of runs)' if steady is None else f'{steady}/h'} "
+            f"over {r['span_s'] / 3600:.1f} h"
+        )
     print(f"\nrecent_runs ({runs_table_name()}, newest first)")
     if not stats["recent_runs"]:
         print("  (none yet -- run ingest.py)")

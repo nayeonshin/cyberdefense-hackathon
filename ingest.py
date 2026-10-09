@@ -32,6 +32,9 @@ Usage:
     python3 ingest.py --daemon                # autonomous: all feeds, per-feed schedule + backoff
     python3 ingest.py --daemon --max-cycles 2 --interval 60   # bounded demo run
     python3 ingest.py --self-test             # parser + scheduler self-check, no network
+    python3 ingest.py --bench                 # offline CAPACITY benchmark (synthetic rows,
+                                              # isolated table; see bench.py)
+    python3 ingest.py --bench --rows 1000000 --batch 50000
 
 Environment (read from .env / clickhouse.env, or the process env):
     CLICKHOUSE_HOST       default: localhost  (or a ClickHouse Cloud host)
@@ -96,6 +99,7 @@ TABLE_NAME = "incoming_threats"  # default; override with THREATS_TABLE
 TABLE_ENV_VAR = "THREATS_TABLE"
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 DNS_TIMEOUT_SECONDS = 2.0
+DEDUP_LOOKUP_CHUNK = 2000  # event_ids per dedup IN-lookup, see drop_duplicates()
 MIN_POLL_INTERVAL_SECONDS = 300
 # `first_seen` is deliberately absent: the DDL default `now()` fills it
 # server-side so it measures ingestion time, not the client's clock.
@@ -859,11 +863,16 @@ def drop_duplicates(
 
     table = table_name(table)
     event_ids = sorted({str(row[0]) for row in rows})
-    result = client.query(
-        f"SELECT DISTINCT event_id FROM {table} WHERE event_id IN {{ids:Array(String)}}",
-        parameters={"ids": event_ids},
-    )
-    existing = {row[0] for row in result.result_rows}
+    # Chunked: the ids travel as one HTTP form field, and ClickHouse rejects
+    # fields over `http_max_field_value_size` (128 KiB by default) -- about
+    # 5-10k ids. Found by the --bench capacity run at 10k-row batches.
+    existing: set[str] = set()
+    for start in range(0, len(event_ids), DEDUP_LOOKUP_CHUNK):
+        result = client.query(
+            f"SELECT DISTINCT event_id FROM {table} WHERE event_id IN {{ids:Array(String)}}",
+            parameters={"ids": event_ids[start : start + DEDUP_LOOKUP_CHUNK]},
+        )
+        existing.update(row[0] for row in result.result_rows)
 
     fresh: list[tuple[Any, ...]] = []
     seen: set[str] = set(existing)
@@ -1195,6 +1204,24 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         metavar="N",
         help="with --daemon: stop after N cycles (for tests and demos; default: unlimited)",
     )
+    bench = parser.add_argument_group(
+        "capacity benchmark",
+        "offline, synthetic rows, isolated table; measures the store, NOT the live feed rate",
+    )
+    bench.add_argument(
+        "--bench",
+        action="store_true",
+        help="run the capacity benchmark (bench.py) and exit; no feed is contacted",
+    )
+    bench.add_argument(
+        "--rows", type=int, default=100_000, help="--bench: synthetic rows (default: 100000)"
+    )
+    bench.add_argument(
+        "--batch", type=int, default=10_000, help="--bench: rows per insert (default: 10000)"
+    )
+    bench.add_argument(
+        "--keep", action="store_true", help="--bench: keep incoming_threats_bench afterwards"
+    )
     parser.add_argument(
         "--self-test",
         action="store_true",
@@ -1524,6 +1551,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.self_test:
         return run_self_test()
+
+    if args.bench:
+        import bench  # local import: bench imports this module
+
+        return bench.cli(args.rows, args.batch, seed=bench.DEFAULT_SEED,
+                         keep=args.keep, verbose=args.verbose)
 
     if args.limit < 1:
         log.error("--limit must be >= 1 (got %d)", args.limit)

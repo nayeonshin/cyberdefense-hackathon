@@ -4,7 +4,7 @@
 
 - **Role:** Member 1, Threat Ingestion & High-Velocity Data Layer
 - **Sponsor tool:** ClickHouse
-- **What's new:** 3 live threat feeds, a hands-off daemon, and run telemetry in ClickHouse
+- **What's new:** 3 live threat feeds, a hands-off daemon, run telemetry, and a measured velocity benchmark
 - **In one line:** We pull live malicious URLs from 3 feeds, nonstop, and give the next stage a clean list of targets.
 
 ---
@@ -29,6 +29,7 @@
   - Feed registry where each feed's errors are isolated.
   - Dedup on insert, plus an `ingest_runs` telemetry table.
   - A stable contract for Member 2.
+  - Velocity measured, not claimed: `--bench` pushes 1M rows through the real ingest path.
 - **Tool Use:**
   - ClickHouse is our sponsor tool.
   - The other sponsor tools come from teammates' parts of the pipeline.
@@ -95,6 +96,22 @@ stats = threatfeed.get_feed_stats()
 
 ---
 
+## Velocity & Volume: Two Numbers, Kept Apart
+
+| | Capacity (`ingest.py --bench`) | Live feed rate (`threatfeed.py --stats`) |
+|---|---|---|
+| Measures | What ClickHouse + our ingest path can absorb | What the real feeds actually deliver |
+| Data | Synthetic, isolated table | URLhaus, OpenPhish, ThreatFox |
+| Result | **~100k rows/s** (100k rows in 1.0 s); **~206k rows/s** (1M rows in 4.9 s) | ~730 records/s processed per poll; new IOCs arrive a few per minute |
+| Query at volume | `get_pending_targets(5)`: **~25 ms** at 100k rows, **~94 ms** at 1M | — |
+
+- The benchmark uses the **same** dedup + bulk-insert functions as the live daemon, not a shortcut.
+- At 1M rows: every `event_id` unique, a re-sent 50k batch adds 0 rows, ranking still correct.
+- The benchmark also **found a real bug**: a poll of more than ~5k records crashed dedup (the HTTP field-size limit). It is fixed (chunked lookups) and covered by a regression test.
+- **How we say it:** the live feeds are the real-time source; the layer under them is built and measured for high velocity.
+
+---
+
 ## Verification & Results
 
 - **Live data:** 289 rows in `incoming_threats`, all PENDING.
@@ -106,6 +123,7 @@ stats = threatfeed.get_feed_stats()
 - **Tests:**
   - Self-test: 32/32
   - Smoke test: 82/82
+  - Volume test: 40/40 (throughput floor, query latency at volume, live-rate maths, 25k-id dedup)
   - Stopping with SIGINT exits with code 0.
 
 ---
@@ -130,9 +148,10 @@ stats = threatfeed.get_feed_stats()
 docker compose up -d                                                  # 1. start ClickHouse
 .venv/bin/python ingest.py --daemon --max-cycles 2 --interval 60 --limit 20
                                                                       # 2. hands-off: cycle 1 inserts, cycle 2 = all duplicates
-.venv/bin/python threatfeed.py --stats                                # 3. counts by feed / type / status + recent runs
+.venv/bin/python threatfeed.py --stats                                # 3. counts + LIVE feed throughput + recent runs
 .venv/bin/python threatfeed.py                                        # 4. ranked pending targets for Member 2
-.venv/bin/python tests/smoke_test.py                                  # 5. 82-check smoke test
+.venv/bin/python ingest.py --bench --rows 1000000 --batch 50000      # 5. CAPACITY: 1M rows in ~5 s
+.venv/bin/python tests/smoke_test.py                                  # 6. 82-check smoke test
 ```
 
-**Takeaway:** 3 live feeds flow into ClickHouse with no one at the keyboard and come out as a ranked, trackable target list for Member 2.
+**Takeaway:** 3 live feeds flow into ClickHouse with no one at the keyboard and come out as a ranked, trackable target list for Member 2 — on a layer measured at ~100k–200k threat rows/s.

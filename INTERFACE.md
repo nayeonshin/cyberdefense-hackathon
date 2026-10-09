@@ -33,7 +33,8 @@ only tests should set it.
 
 ## `get_pending_targets(limit: int = 5) -> list[dict]`
 
-Returns the highest-velocity unverified targets, **one row per domain**, not per URL.
+Returns the most active unverified targets (the domains with the most reported
+URLs), **one row per domain**, not per URL.
 "Pending" means `takedown_status = 'PENDING'` — i.e. nobody has scanned or actioned it yet.
 
 Ordering: number of reported URLs descending, then most recently seen descending.
@@ -134,11 +135,25 @@ Read-only pipeline statistics (additive; for dashboards / the demo). Also printe
   "by_status":      [{"takedown_status": "PENDING", "rows": 289}, ...],
   "recent_runs":    [{"run_ts": datetime(UTC), "feed_source": "urlhaus", "fetched": 1000,
                       "inserted": 20, "duplicates": 0, "error": "", "duration_ms": 1456}, ...],
+  "throughput":     [{"feed_source": "urlhaus", "runs": 3, "failed_runs": 0, "fetched": 3000,
+                      "inserted": 56, "duplicates": 94, "busy_s": 4.0, "span_s": 3600,
+                      "processed_per_s": 750.0, "steady_new_per_hour": 6.0}, ...],
 }
 ```
 
 `recent_runs` comes from the `ingest_runs` table (newest first, at most `recent`) and is `[]`
 if that table does not exist yet. Raises `ValueError` if `recent` is not an int >= 1.
+
+`throughput` (additive) is the **live feed rate**, one row per feed, from `ingest_runs`:
+
+- `processed_per_s` = `fetched / busy_s` — records the pipeline fetched, mapped and deduped per
+  second of its own working time.
+- `steady_new_per_hour` = genuinely new rows per hour of wall clock between a feed's first and
+  last run, **excluding the first run's cold-start backlog**. It is the feed's real emission
+  rate. `None` until the runs span at least 10 minutes (shorter windows are noise).
+
+Synthetic `ingest.py --bench` rows never reach `ingest_runs`, so they cannot inflate these
+numbers. The store's capacity is a separate figure — see `bench.py`.
 
 ---
 
