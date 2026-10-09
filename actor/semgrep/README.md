@@ -31,15 +31,22 @@ status: SENT
 
 ## What Semgrep found
 
-| Scan | Rules | Findings |
+| Scan | Rules that ran | Findings |
 |---|---|---|
-| Baseline `a258b3b` | Registry packs `p/python` and `p/security-audit` | 0 |
+| Baseline `a258b3b` | 444 rules from seven registry rulesets: `p/default`, `p/python`, `p/security-audit`, `p/owasp-top-ten`, `p/cwe-top-25`, `p/secrets`, `p/bandit` | 1, and not the traversal: a notice that `feed.py` imports `subprocess` |
 | Baseline `a258b3b` | Custom rule [untrusted-id-in-file-path.yaml](untrusted-id-in-file-path.yaml) | 3 (`feed.py` lines 128 and 129, `xarf_email.py` line 94) |
+| Current code | The same seven rulesets, 465 rules on 42 files | 3, all the same `subprocess` import notice (`feed.py`, `bench/run.py`, `live.py`) |
 | Current code | Same custom rule | 0 |
 
-The stock packs did not flag it: nothing in the code looks like a classic `open(request...)`
-sink, the identifier is an attribute of a dataclass and the path is built with the `/`
-operator. The custom rule describes exactly that shape.
+A clean scan says little until you know which rules ran, so the counts are part of the
+result. 444 stock rules across seven rulesets ran over the vulnerable commit and none of them
+saw the traversal: nothing in the code looks like a classic `open(request...)` sink, the
+identifier is an attribute of a dataclass and the path is built with the `/` operator. The
+custom rule describes exactly that shape, and it is the only one that fires.
+
+The three notices on the current code were checked by hand. Each is `import subprocess`
+(Bandit B404); every call passes git an argument list and none uses a shell, so no input
+reaches a command line.
 
 ## Why it is interesting
 
@@ -61,6 +68,7 @@ every future change.
 ## Reproduce
 
 ```bash
+semgrep scan --config p/default --config p/python --config p/security-audit --config p/owasp-top-ten         --config p/cwe-top-25 --config p/secrets --config p/bandit actor   # prints "Ran N rules on M files"
 semgrep --config actor/semgrep/untrusted-id-in-file-path.yaml actor      # current code: 0
 git worktree add ../actor-baseline a258b3b
 semgrep --config actor/semgrep/untrusted-id-in-file-path.yaml ../actor-baseline/actor   # 3
