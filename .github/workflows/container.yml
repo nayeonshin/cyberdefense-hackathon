@@ -1,7 +1,7 @@
 name: Test and publish Member 4 image
 on:
   push:
-    branches: [member4-shipper]
+    branches: [member4-shipper, integration/frontend-backend]
   workflow_dispatch:
 permissions:
   contents: read
@@ -55,7 +55,7 @@ jobs:
             docker pull "$ci_clickhouse_image"
             docker tag "$ci_clickhouse_image" clickhouse-ci:verified
           fi
-          docker run -d --name clickhouse-ci --network demo-net \
+          docker run -d --name clickhouse-ci --network demo-net -p 18123:8123 \
             -e CLICKHOUSE_USER=demo -e CLICKHOUSE_PASSWORD=ci-only \
             -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 \
             clickhouse-ci:verified
@@ -64,6 +64,11 @@ jobs:
             sleep 2
           done
           docker exec clickhouse-ci clickhouse-client --user demo --password ci-only --query 'SELECT 1'
+          # Native Member 1/2 tables plus the read-only Member 4 adapter, isolated
+          # in temporary test databases. Never connects to the shared team DB.
+          RUN_CLICKHOUSE_TESTS=1 CLICKHOUSE_HOST=localhost CLICKHOUSE_PORT=18123 \
+            CLICKHOUSE_USER=demo CLICKHOUSE_PASSWORD=ci-only CLICKHOUSE_SECURE=0 \
+            python -m pytest tests/test_clickhouse_roundtrip.py tests/test_backend_clickhouse.py -q
           docker run -d --name demo --network demo-net -p 8501:8501 -v demo-data:/data \
             -e DATA_SOURCE=clickhouse -e EVENTS_TABLE=shipper_events \
             -e CLICKHOUSE_HOST=clickhouse-ci -e CLICKHOUSE_PORT=8123 \

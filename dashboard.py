@@ -10,21 +10,24 @@ import pandas as pd
 import streamlit as st
 
 from shipper.data import make_source
-from shipper.model import current_confirmation, defang, parse_time, public_proof, scan_label
+from shipper.model import current_confirmation, defang, parse_time, public_proof, scan_complete, scan_label
 from shipper.presentation import (
     accept_queue_selection, metrics_html, receipt_state, resolve_selection,
     status_tone, timeline, timeline_html,
 )
 from shipper.settings import Settings
 from shipper.runtime_status import read_runtime_status
+from shipper.motion import render_motion
+from shipper.motion_model import motion_state
 
 st.set_page_config(page_title="Takedown Orchestrator", page_icon="🛡️", layout="wide")
 st.html("<style>" + (Path(__file__).parent / "shipper/dashboard.css").read_text(encoding="utf-8") + "</style>")
 settings = Settings.from_env()
-st.caption("CYBERDEFENSE / OBSERVE → VERIFY → ACT")
 st.title("Takedown Orchestrator")
 if settings.source == "fixtures":
     st.warning("Simulated data — supplied examples only. No live scans or dispatched reports.", icon="🧪")
+elif settings.source == "backend":
+    st.info("Connected backend · Read-only view of ingestion, scanner verdicts, and Actor receipts. Backend workers run separately.")
 elif settings.mode == "controlled":
     st.info("Controlled demo · Harmless team-owned target · Private mock registrar · External reporting disabled.", icon="🛡️")
 else:
@@ -62,7 +65,7 @@ def render_details(record, receipts, heartbeat, check):
     owned_target = event["target_url"] == settings.controlled_url
     fresh_down = (owned_target and check.get("http_status") == 410
                   and current_confirmation(check, heartbeat, os.getenv("SHIPPER_STARTED_AT")))
-    historical = settings.mode == "controlled" and not fresh_down
+    historical = settings.source == "backend" or (settings.mode == "controlled" and not fresh_down)
     st.subheader("Event investigation")
     st.text(selected)
     st.html(timeline_html(timeline(record, matching, historical=historical)))
@@ -71,9 +74,12 @@ def render_details(record, receipts, heartbeat, check):
     st.subheader("Scan evidence")
     scan = scan_label(event, metadata)
     st.html(label_html(scan))
-    completed = bool(metadata.get("scan_completed_at"))
+    completed = scan_complete(metadata)
     confidence = f"{event['confidence_score']:.2f}" if completed and scan != "Scan failed" else "Not available"
     st.caption(f"Scanner confidence: {confidence} · Scanner: {metadata.get('scanner') or 'not reported'}")
+    if metadata.get("source") == "backend":
+        st.caption("Scan time: " + metadata.get("scan_time_basis", "Not recorded") +
+                   ". Actor outcome timestamps are not used as scan times.")
     st.code(event["evidence"] or "No completed scan evidence yet.", language=None, wrap_lines=True)
     with st.expander("Exact shared contract"):
         st.json(event)
@@ -105,7 +111,7 @@ def render_details(record, receipts, heartbeat, check):
 
 def render_run_details(snapshot, error, pipeline):
     with st.expander("Run details"):
-        st.text(f"Run: {settings.run_id}")
+        st.text("Scope: configured backend tables (all runs)" if settings.source == "backend" else f"Run: {settings.run_id}")
         st.text(f"Source: {settings.source} · Refresh: 2 seconds")
         if pipeline:
             st.text("Pipeline: " + pipeline.get("detail", pipeline.get("status", "Unknown")))
@@ -114,13 +120,15 @@ def render_run_details(snapshot, error, pipeline):
             st.error(deployment_error)
         st.text("Akash: " + (f"deployment {deployment['dseq']}" if deployment.get("dseq") else "deployment not verified"))
         runtime_scan = bool(snapshot and any(
-            r["metadata"].get("scanner") == "semgrep" and r["metadata"].get("scan_completed_at")
+            r["metadata"].get("scanner") == "semgrep" and scan_complete(r["metadata"])
             and scan_label(r["event"], r["metadata"]) != "Scan failed" for r in snapshot["events"]))
         st.text("Semgrep: " + ("completed scan recorded in this run" if runtime_scan else "no actual scan evidence in this run"))
         database_status = ("connected in this runtime" if snapshot and not error else "connection unavailable")
-        st.text("ClickHouse: " + (database_status if settings.source == "clickhouse" else "not connected in this runtime"))
+        st.text("ClickHouse: " + (database_status if settings.source in {"clickhouse", "backend"} else "not connected in this runtime"))
         st.markdown("[ClickHouse CI evidence — separate environment](https://github.com/nayeonshin/cyberdefense-hackathon/actions/runs/37982475135)")
-        st.text("Guild AI: execution evidence pending")
+        st.text("Guild AI: not used")
+        if settings.source == "backend":
+            st.caption("Latest 200 events shown; metrics cover all configured backend events. Confirmations are saved observations, not a fresh target probe.")
         st.caption("Runtime status and separate CI evidence are not interchangeable.")
         if snapshot:
             st.caption(f"Snapshot queries: {snapshot['query_ms']:.0f} ms")
@@ -129,6 +137,15 @@ def render_run_details(snapshot, error, pipeline):
 
 @st.fragment(run_every="2s")
 def live_panels():
+    context = (settings.source, settings.mode, settings.run_id, str(settings.data_dir),
+               *(os.getenv(name, "") for name in ("CLICKHOUSE_HOST", "CLICKHOUSE_DATABASE",
+                   "EVENTS_TABLE", "THREATS_TABLE", "VERDICTS_TABLE", "ACTIONS_TABLE")))
+    if st.session_state.get("snapshot_context") != context:
+        # A failed switch from fixtures to a backend must not relabel the old
+        # sample snapshot as real data. Retain stale data only within one source.
+        st.session_state.pop("snapshot", None)
+        st.session_state.pop("selected_event", None)
+        st.session_state["snapshot_context"] = context
     error = None
     try:
         st.session_state["snapshot"] = load_snapshot()
@@ -136,10 +153,12 @@ def live_panels():
         error = type(exc).__name__
     snapshot = st.session_state.get("snapshot")
     statuses = []
+    runtime_error = False
     for name in ("heartbeat.json", "supervisor.json", "pipeline.json", "target-check.json"):
         value, status_error = read_runtime_status(settings.run_dir / name)
         statuses.append(value)
         if status_error:
+            runtime_error = True
             st.error(status_error)
     heartbeat, supervisor, pipeline, check = statuses
     updated = parse_time(heartbeat.get("updated_at"))
@@ -148,7 +167,8 @@ def live_panels():
     boot, worker_start = parse_time(os.getenv("SHIPPER_STARTED_AT")), parse_time(heartbeat.get("started_at"))
     stale_worker = age is None or age < 0 or age > 15 or bool(boot and (not worker_start or worker_start < boot))
     if stale_worker:
-        st.warning("Worker heartbeat unavailable or stale. Pipeline activity cannot be confirmed.")
+        st.warning("Backend worker heartbeat is not exposed. Worker availability cannot be confirmed." if settings.source == "backend" else
+                   "Worker heartbeat unavailable or stale. Pipeline activity cannot be confirmed.")
     elif status in {"degraded", "paused", "stopped"}:
         st.warning(f"Worker {status}: {heartbeat.get('detail', '')}")
     if supervisor.get("status") == "failed":
@@ -161,14 +181,16 @@ def live_panels():
         st.error(f"Data source unavailable ({error}). Showing the last successful snapshot, if any. No fixture fallback.")
     if snapshot is None:
         st.info("Waiting for data. Check the data source and team pipeline configuration.")
+        render_motion(motion_state(None, [], simulated=settings.source == "fixtures", degraded=True))
         render_run_details(snapshot, error, pipeline)
         return
     elapsed = (datetime.now(timezone.utc) - snapshot["fetched_at"]).total_seconds()
     worker_label = "unavailable / stale" if stale_worker else f"{status} · heartbeat {age:.0f}s ago"
     st.caption(f"Worker {worker_label} · Last successful refresh {snapshot['fetched_at']:%H:%M:%S} UTC · {elapsed:.0f}s ago")
-    st.html(metrics_html(snapshot["metrics"]))
-    st.caption("Throughput uses ingestion time. Submitted actions count SENT receipts only; saved test messages are excluded.")
     records, receipts = snapshot["events"], snapshot["receipts"]
+    degraded = bool(error or runtime_error or elapsed > 8 or supervisor.get("status") == "failed"
+                    or pipeline.get("status") == "degraded"
+                    or (settings.source != "fixtures" and (stale_worker or status != "running")))
     ids = [r["event"]["event_id"] for r in records]
     selected, disappeared = resolve_selection(ids, st.session_state.get("selected_event"), st.query_params.get("event"))
     st.session_state["selected_event"] = selected
@@ -177,6 +199,8 @@ def live_panels():
                 "The selected event is no longer available. The queue is empty.")
     if not records:
         st.info("No events in this run yet. Waiting for ingestion.")
+        render_motion(motion_state(None, [], simulated=settings.source == "fixtures", degraded=degraded))
+        st.html(metrics_html(snapshot["metrics"]))
         render_run_details(snapshot, error, pipeline)
         return
 
@@ -185,12 +209,18 @@ def live_panels():
     st.session_state["queue_event_ids"] = ids
     st.session_state["threat_queue"] = {"selection": {"rows": [ids.index(selected)], "columns": [], "cells": []}}
     fresh = check.get("http_status") == 410 and current_confirmation(check, heartbeat, os.getenv("SHIPPER_STARTED_AT"))
+    selected_record = next(r for r in records if r["event"]["event_id"] == selected)
+    historical = settings.source == "backend" or (settings.mode == "controlled" and not (fresh and selected_record["event"]["target_url"] == settings.controlled_url))
+    render_motion(motion_state(selected_record, receipts, simulated=settings.source == "fixtures",
+                               historical=historical, degraded=degraded))
+    st.html(metrics_html(snapshot["metrics"]))
+    st.caption("Throughput uses ingestion time. Submitted actions count SENT receipts only; saved test messages are excluded.")
     rows = []
     for record in records:
         event, metadata = record["event"], record["metadata"]
         matching = sorted((r for r in receipts if r["event_id"] == event["event_id"]),
                           key=lambda r: r.get("created_at", ""), reverse=True)
-        historical = settings.mode == "controlled" and not (fresh and event["target_url"] == settings.controlled_url)
+        historical = settings.source == "backend" or (settings.mode == "controlled" and not (fresh and event["target_url"] == settings.controlled_url))
         scan = scan_label(event, metadata)
         rows.append({"Event": event["event_id"], "Target": defang(event["target_url"]), "Scan": scan,
                      "Action": receipt_state(matching[0], historical) if matching else
@@ -211,7 +241,7 @@ def live_panels():
                          column_config={"Event": st.column_config.TextColumn(width="medium"),
                                         "Target": st.column_config.TextColumn(width="large")})
         with detail, st.container(key="event_details"):
-            render_details(next(r for r in records if r["event"]["event_id"] == selected), receipts, heartbeat, check)
+            render_details(selected_record, receipts, heartbeat, check)
     render_run_details(snapshot, error, pipeline)
 
 

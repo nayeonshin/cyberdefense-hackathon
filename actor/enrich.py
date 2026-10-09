@@ -32,6 +32,20 @@ def is_ip(host: str) -> bool:
         return False
 
 
+INTERNAL_NETWORKS = [ipaddress.ip_network(n) for n in (
+    "0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16",
+    "172.16.0.0/12", "192.168.0.0/16", "224.0.0.0/3", "::1/128", "fc00::/7", "fe80::/10")]
+
+
+def is_internal(address: str) -> bool:
+    """Private, loopback, link-local and similar addresses that no report may name."""
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return False
+    return any(ip in network for network in INTERNAL_NETWORKS if network.version == ip.version)
+
+
 def resolve(host: str) -> list:
     if is_ip(host):
         return [host]

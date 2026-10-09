@@ -1,9 +1,9 @@
-:root{--ink:#0c0a08;--bone:#f4f2f0;--paper:#fff;--ash:#6d6c6b;--line:#e5e7eb;--accent:#e4f222;--danger:#a12b24;--pending:#805500}
+:root{--ink:#141d2c;--bone:#f4f5f7;--paper:#fff;--ash:#626d7c;--line:#e0e4eb;--accent:#e4f222;--danger:#a12b24;--pending:#805500}
 html,body,[data-testid="stApp"],button,input,textarea{font-family:Inter,ui-sans-serif,system-ui,sans-serif!important;font-weight:400!important}
 [data-testid="stAppViewContainer"]{background:var(--bone)}
-.block-container{max-width:1200px;padding:4.25rem 24px 3rem}
+.block-container{max-width:1200px;padding:3.25rem 24px 3rem}
 h1,h2,h3,h4,h5,h6,p,strong,b,label,[data-testid="stMarkdownContainer"]{font-weight:400!important}
-h1{font-size:40px!important;line-height:1.05!important;letter-spacing:-1.2px;padding-bottom:12px!important}
+h1{font-size:26px!important;line-height:1.2!important;letter-spacing:-.8px;padding-bottom:12px!important}
 h2,h3{font-size:24px!important;line-height:1.17!important;letter-spacing:-.4px}
 p,li{font-size:16px;line-height:1.5}
 [data-testid="stCaptionContainer"],[data-testid="stCaptionContainer"] p{color:var(--ash);font-size:12px!important;line-height:1.6}
@@ -45,5 +45,5 @@ a:focus-visible,button:focus-visible,input:focus-visible,summary:focus-visible{o
 .status-label.danger{color:var(--danger);border-color:#dcb4b0}
 .status-label.pending{color:var(--pending);border-color:#d4c097}
 @media(max-width:900px){.st-key-investigation>[data-testid="stVerticalBlock"]>[data-testid="stHorizontalBlock"]{flex-direction:column!important}.st-key-investigation [data-testid="stColumn"]{width:100%!important;flex:1 1 100%!important;min-width:100%!important}}
-@media(max-width:600px){.block-container{padding:2.5rem 16px 2rem}h1{font-size:30px!important}.metrics-strip{grid-template-columns:repeat(2,1fr);gap:20px 0}.metrics-strip>div{border:0}.st-key-event_details,.st-key-queue_panel{padding:16px!important}}
+@media(max-width:600px){.block-container{padding:4.5rem 16px 2rem}h1{font-size:26px!important}.metrics-strip{grid-template-columns:repeat(2,1fr);gap:20px 0}.metrics-strip>div{border:0}.st-key-event_details,.st-key-queue_panel{padding:16px!important}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}

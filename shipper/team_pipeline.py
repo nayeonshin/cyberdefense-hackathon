@@ -36,7 +36,7 @@ FROM shipper_event_versions FINAL"""
 
 class TeamPipeline:
     def __init__(self, settings):
-        if settings.mode != "controlled" or settings.source == "fixtures":
+        if settings.mode != "controlled" or settings.source not in {"files", "clickhouse"}:
             raise ValueError("Team pipeline requires controlled mode and files or ClickHouse")
         self.settings = settings
         self.path = settings.run_dir / "events.json"

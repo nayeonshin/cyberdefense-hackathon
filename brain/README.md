@@ -8,6 +8,163 @@ Takes an event in the team's shared contract, fetches what the URL serves, scans
 
 All other fields pass through unchanged.
 
+## Member 1 integration
+
+The ingestion implementation from `feature/clickhouse-ingest` is included at
+commit `80b4186`, including the OpenPhish/ThreatFox adapters, autonomous daemon,
+run telemetry, and capacity benchmark. Its public API and domain summaries are described in
+[INTERFACE.md](../INTERFACE.md). Use one app environment for both parts:
+
+```sh
+python -m pip install -r requirements.txt
+# Fill in the gitignored clickhouse.env using clickhouse.env.example.
+python ingest.py --feeds all --limit 100
+# Autonomous ingestion, per-feed schedules and exponential backoff:
+python ingest.py --daemon --limit 100
+python threatfeed.py --stats
+python -m brain.worker --once
+python -m brain.worker --limit 25 --interval 10
+```
+
+The worker reads up to 25 full URL events, calls the existing batch scanner,
+and appends the eight shared-contract fields to `events`. Member 1's
+`incoming_threats` keeps feed metadata; the worker marks only the scanned
+**event ID** as `SCANNED`, using Member 1's synchronous update API. It does not
+mark an entire domain complete after scanning one page. The separate events
+table retains VERIFIED, REJECTED or FETCH_FAILED for Member 3 to consume with
+`SELECT * FROM events FINAL WHERE action_status = 'VERIFIED'`.
+
+`brain/clickhouse.py` is the per-event adapter because domain summaries do not
+include event IDs and their URL list is capped at ten. Its pending query excludes
+already persisted verdicts, so partial writes resume from unwritten events.
+An interrupted raw-status mutation is reconciled on the next poll. Run one
+worker per database; parallel workers require an external claim/lease mechanism.
+The ingest poller should also have only one writer per database.
+
+`CLICKHOUSE_DATABASE` selects the database namespace. `THREATS_TABLE` (raw feed
+rows, default `incoming_threats`) and `VERDICTS_TABLE` (shared-contract verdicts,
+default `events`) select validated table names for isolated development/tests.
+`confidence_score` is stored as Float64 so that 0.95 reads back as 0.95; the worker widens
+an older Float32 table when it starts. `VERDICTS_TABLE` is the same variable the Actor reads. The Actor uses
+`EVENTS_TABLE` for the raw feed table, so the Brain deliberately does not read it. URLhaus/OpenPhish/ThreatFox feed rows
+set the independent-feed flag; synthetic demo rows use `feed_source: demo` and
+receive no feed confidence bonus.
+
+Ingestion defaults to URLhaus; use `--feeds openphish`, `--feeds threatfox`, or
+`--feeds all` to select the new sources. `--limit` applies per feed;
+`--threat-type` and DNS resolution apply only to URLhaus. OpenPhish reports
+`phishing` using its fetch time; ThreatFox normalizes `botnet_cc` to `c2` and
+`payload_delivery` to `malware_download`. ThreatFox domain and IP/port indicators
+are represented as HTTP URLs; the scanner inspects HTTP text, so a C2 listing
+alone does not establish a scanner verdict or guarantee a fetchable page.
+
+OpenPhish and ThreatFox IDs are namespaced and stable across polls. The same
+URL on different feeds remains separate events and may be scanned twice.
+Domain activity counts distinct URLs per hour, while threat-type and verdict
+graphs count events. A feed failure allows other selected feeds to proceed;
+if all candidate records fail mapping, ingestion exits with code 3.
+The daemon defaults to all feeds, backs off each failing feed separately, and
+continues polling. `RUNS_TABLE` defaults to `ingest_runs`; it stores per-attempt
+counters and errors for `get_feed_stats()`. This telemetry is separate from the
+three scanner graphs. A telemetry write failure does not undo successful ingestion.
+
+### Refined integration tests and graphs
+
+The ordinary suite runs without ClickHouse and skips database tests. To opt in,
+point the connection variables at a **local test server**, set
+`RUN_CLICKHOUSE_TESTS=1`, and run `python -m pytest tests -q`. Database roundtrip
+tests use unique databases; Member 1's smoke test uses a unique table and
+restores `THREATS_TABLE`. No real malicious URL or live feed is fetched.
+
+Coverage includes the updated filters and domain rules, repeated IDs, timestamp
+preservation, newest-first domain URL summaries, the ten-URL summary cap,
+all three scanner verdicts, per-event write-back, empty queues, malformed scan
+responses and recovery after interrupted writes. Graph tests verify hourly
+distinct URL counts, distinct event counts by threat type and current verdict
+counts after event version replacement.
+
+```sh
+python -m brain.telemetry --output graph-data.json
+# Optional SVG/PNG/PDF export; Matplotlib is separate from runtime requirements.
+python -m pip install -r requirements-plots.txt
+python -m brain.telemetry --output graph-data.json --plot graph-summary.svg
+```
+
+The JSON contains `domain_activity`, `threat_types` and `scanner_verdicts` for a
+dashboard to consume. Activity buckets use the feed's report timestamp in UTC,
+not ingestion time. Verdicts count current scanner-stage events from `events
+FINAL`; events advanced to an Actor status are excluded. Pending/unscanned feed
+rows are not classified as rejected. The plot shows the ten busiest domains;
+JSON retains every domain. Pass `INTEGRATION_GRAPH_OUTPUT=artifacts/member1-integration`
+to the opt-in tests to export JSON/SVG/PNG from the three owned demo fixtures.
+
+The local database was tested with ClickHouse 26.9.14.10. Shared ClickHouse Cloud
+credentials and live URLhaus polling are not verified by these synthetic tests.
+
+Validation on 2026-10-09: the full suite with the local database enabled finished
+`33 passed, 1 warning in 310.06s`. The focused integration suite without a
+database finished `12 passed, 5 skipped in 0.40s`. The warning is the existing
+Starlette/httpx deprecation. The generated [SVG](../artifacts/member1-integration.svg),
+[PNG](../artifacts/member1-integration.png) and [JSON](../artifacts/member1-integration.json)
+show the synthetic fixture: two hourly buckets with 1 and 2 URLs, threat counts
+of 2 phishing and 1 malware-download reports, and one of each scanner verdict.
+
+Multi-feed update validation on 2026-10-09: focused offline tests finished
+`37 passed, 6 skipped`; ingestion self-checks finished `32/32 checks passed`.
+The added tests cover feed selection, malformed URLs/ports/timestamps, IPv6,
+stable IDs, partial feed outages, and feed provenance reaching the scanner.
+Daemon tests verify scheduling after crashed cycles, backoff after 1,100
+consecutive failures, recovery after success, telemetry write failures, and
+restoration of both smoke-test table overrides. Dashboard tests cover missing
+run tables, bounded recent-run queries, UTC timestamps and mapped counters.
+An added opt-in database test checks OpenPhish/ThreatFox repeat polling,
+write-back, overlapping URL counts and `c2` graph categories. The database
+rerun could not be completed: the temporary ClickHouse container exited,
+and the environment's approval review blocked restarting it. Live feeds
+were not contacted. See the capacity update below for the subsequent database rerun.
+
+### Capacity and live-feed throughput update
+
+`drop_duplicates()` now looks up at most 2,000 IDs per query, allowing large
+polls to pass through the existing deduplication and bulk-insert path. The
+scanner worker still processes batches of at most 25; ingestion capacity
+does not imply the same scanning rate.
+
+```sh
+python ingest.py --bench --rows 100000 --batch 10000
+python tests/volume_test.py --rows 100000 --batch 10000
+python threatfeed.py --stats
+```
+
+The benchmark requires ClickHouse but no feed access or Auth-Key. It uses a
+unique `incoming_threats_bench_<uuid>` table, refuses existing/configured live
+tables, and drops its own table unless `--keep`. Synthetic URLs use `.invalid`
+domains or `198.51.100.0/24` addresses. It writes no `ingest_runs` telemetry.
+Capacity measures deduplication and insertion, plus domain-query latency;
+it does not run HTTP fetching, Semgrep, Guild or takedown actions.
+
+`get_feed_stats()["throughput"]` reports fetched records per busy second and
+new rows per wall-clock hour, excluding the first run's backlog. The hourly
+rate stays null until a feed spans ten minutes of recorded runs. These live
+statistics are separate from synthetic capacity and the three scanner graphs.
+Volume tests have unique tables and require `RUN_VOLUME_TESTS=1` under pytest;
+ordinary pytest collection never changes table settings or runs a benchmark.
+
+The demo command `python ingest.py --bench --rows 100000 --batch 50000` was
+verified locally against ClickHouse 26.9.14.10 on 2026-10-09. It inserted
+100,000 synthetic rows in two batches at 74,396 rows/s through deduplication
+and insertion (179,265 rows/s insert-only). Domain-query p50 was 69 ms; the
+50,000-row redelivery added no rows. All four integrity checks passed and the
+unique benchmark table was dropped. These timings describe this local Windows /
+WSL test setup, not scanner throughput or a guaranteed deployment rate.
+
+The full suite with `RUN_CLICKHOUSE_TESTS=1` and `RUN_VOLUME_TESTS=1` finished
+`71 passed, 1 warning in 318.51s`. This includes scanner/demo HTTP behavior,
+new-feed write-back, graph counts, database smoke checks, the 100,000-row
+capacity floor, and 25,000-ID deduplication. The warning is the existing
+Starlette/httpx deprecation. All 32 ingestion self-checks also passed.
+Shared ClickHouse Cloud and real feed traffic remain untested here.
+
 ## Setup
 
 Install Semgrep in its own environment: it pins dependency versions that conflict with FastAPI's.

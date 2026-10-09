@@ -9,11 +9,13 @@ import json
 import sys
 import time
 
-from . import config, evidence, policy as policy_module
+from . import config, evidence, history, policy as policy_module
 from .actions import Context, registry
-from .contract import DONE_STATUSES, Receipt, Verdict
+from .contract import DONE_STATUSES, Receipt, Verdict, safe_id
 from .enrich import Enrichment, enrich
 from .ledger import Ledger, clickhouse_client
+
+MAIL_ACTIONS = ("notify_host", "notify_registrar")
 
 DEFAULT_QUERY = """
 SELECT event_id, target_url, toString(timestamp) AS timestamp, semgrep_detected,
@@ -29,10 +31,12 @@ LIMIT 20
 def run_plans(verdict: Verdict, enrichment: Enrichment, plans: list, live: bool,
               ledger: Ledger, policy: dict) -> list:
     """Execute (or only plan) each action and write one receipt per action."""
-    bundle = evidence.build(verdict, enrichment)
+    bundle = evidence.build(verdict, enrichment, history.lookup(verdict.host))
     sha = evidence.digest(bundle)
     modules = registry()
     limit = policy["rate_limit_per_recipient_per_hour"]
+    # Mail about the team's own target only ever reaches the sink, so rehearsals are not counted.
+    controlled = policy_module.is_controlled(verdict, policy)
     receipts = []
     for plan in plans:
         module = modules[plan.action]
@@ -48,9 +52,11 @@ def run_plans(verdict: Verdict, enrichment: Enrichment, plans: list, live: bool,
             receipt.detail = "simulated verdict, never sent: " + receipt.detail
         elif module.LIVE_FLAG and not config.flag(module.LIVE_FLAG):
             receipt.detail = f"channel off ({module.LIVE_FLAG}=0): " + receipt.detail
-        elif ledger.count_recent(plan.recipient) >= limit:
+        elif plan.action in MAIL_ACTIONS and not controlled and ledger.count_recent(plan.recipient) >= limit:
             receipt.status = "SKIPPED"
-            receipt.detail = f"rate limit of {limit} per hour reached for {plan.recipient}"
+            receipt.detail = f"rate limit of {limit} mails per hour reached for {plan.recipient}"
+        elif plan.action == "abuseipdb" and ledger.reported(plan.action, plan.recipient, verdict.host):
+            receipt.status, receipt.detail = "SKIPPED", f"{plan.recipient} was already reported"
         else:
             started = time.perf_counter()
             try:
@@ -69,13 +75,30 @@ def run_plans(verdict: Verdict, enrichment: Enrichment, plans: list, live: bool,
 def dispatch(verdict, live: bool = False, offline: bool = False,
              ledger: Ledger = None, policy: dict = None) -> list:
     """Run the ladder for one verdict (a dict in the team contract, or a Verdict)."""
-    if isinstance(verdict, dict):
-        verdict = Verdict.from_dict(verdict)
     ledger = ledger or Ledger()
+    if not isinstance(verdict, Verdict):
+        try:
+            verdict = Verdict.from_dict(verdict)
+        except ValueError as exc:
+            claimed = verdict.get("event_id", "invalid") if isinstance(verdict, dict) else "invalid"
+            refusal = Receipt(safe_id(claimed), "", "", "all", 0, "", "SKIPPED", dry_run=not live,
+                              detail=f"malformed verdict refused: {exc}")
+            ledger.append(refusal)
+            return [refusal]
     policy = policy or policy_module.load()
     controlled = policy_module.is_controlled(verdict, policy)
     enrichment = enrich(verdict.host, offline=offline or controlled)
-    done = ledger.done_actions(verdict.host) if live else frozenset()
+    # A query on the history table can stand in for the second source: enough malicious
+    # URLs already on record for this host and the Actor may notify the hosting provider.
+    record = None if controlled else history.lookup(verdict.host)
+    if record and record["urls_on_record"] >= policy["history"]["corroborates_at"]:
+        verdict.corroborated = True
+    if not live:
+        done = frozenset()
+    elif policy_module.is_allowlisted(verdict.host, policy):
+        done = ledger.done_for_url(verdict.target_url)
+    else:
+        done = ledger.done_actions(verdict.host)
     decision = policy_module.decide(verdict, enrichment, policy, done)
 
     receipts = run_plans(verdict, enrichment, decision.plans, live, ledger, policy)

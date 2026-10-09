@@ -1,9 +1,9 @@
 [theme]
 base = "light"
 primaryColor = "#e4f222"
-backgroundColor = "#f4f2f0"
+backgroundColor = "#f4f5f7"
 secondaryBackgroundColor = "#ffffff"
-textColor = "#0c0a08"
+textColor = "#141d2c"
 font = "Inter, sans-serif"
 baseFontWeight = 400
 

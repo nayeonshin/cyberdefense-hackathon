@@ -76,10 +76,14 @@ def public_proof(url):
         return None
 
 
+def scan_complete(metadata):
+    return bool(metadata.get("scan_completed_at") or metadata.get("scan_completed") is True)
+
+
 def scan_label(event, metadata):
     if metadata.get("scan_error") or event.get("action_status") in {"FETCH_FAILED", "SCAN_FAILED"}:
         return "Scan failed"
-    if not metadata.get("scan_completed_at"):
+    if not scan_complete(metadata):
         return "Pending scan"
     return "Threat detected" if event["semgrep_detected"] else "No rule matched"
 

@@ -10,7 +10,8 @@ from email.utils import formatdate, make_msgid
 from pathlib import Path
 
 from .. import config
-from ..evidence import defang
+from ..contract import safe_id
+from ..evidence import defang, for_people, on_record
 from . import Context, Outcome
 
 LIVE_FLAG = None          # always runs in live mode, but only into the sink by default
@@ -65,9 +66,11 @@ def build(ctx: Context, to_address: str) -> EmailMessage:
         f"Domain:          {defang(verdict.host)}",
         f"IP address:      {', '.join(ctx.enrichment.ips) or 'did not resolve'}",
         f"Observed (UTC):  {verdict.timestamp}",
-        f"Evidence:        {verdict.evidence}",
+        f"Evidence:        {for_people(verdict.evidence)}",
         f"Evidence SHA-256: {ctx.sha}",
     ]
+    if on_record(ctx.bundle):
+        lines.append(f"On record:       {on_record(ctx.bundle)}")
     if feed:
         lines.append(f"Evidence bundle: {feed}/incidents/{verdict.event_id}.json")
     lines += [
@@ -91,7 +94,8 @@ def execute(ctx: Context) -> Outcome:
     outbox = Path(config.get("OUTBOX_DIR") or config.ROOT / "outbox")
     outbox.mkdir(parents=True, exist_ok=True)
     stage = "registrar" if ctx.action == "notify_registrar" else "host"
-    eml = outbox / f"{ctx.verdict.event_id}-{stage}.eml"
+    name = safe_id(ctx.verdict.event_id)
+    eml = outbox / f"{name}-{stage}.eml"
     eml.write_bytes(bytes(message))
 
     if live:

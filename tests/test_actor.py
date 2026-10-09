@@ -177,13 +177,16 @@ class ChannelTests(unittest.TestCase):
         self.assertEqual(by_action["notify_host"].status, "SINK")
         self.assertTrue(server.suspended)
 
+        again = dispatch(target, live=True, ledger=self.ledger)              # open incident: no duplicates
+        self.assertTrue(all(r.status == "SKIPPED" for r in again))
+
         self.assertEqual(recheck_once(self.ledger, POLICY, live=True), [])   # first failed check
         confirmed = recheck_once(self.ledger, POLICY, live=True)             # second confirms
         self.assertEqual([r.status for r in confirmed], ["CONFIRMED_DOWN"])
         self.assertEqual(recheck_once(self.ledger, POLICY, live=True), [])   # nothing left
 
-        again = dispatch(target, live=True, ledger=self.ledger)              # no duplicates
-        self.assertTrue(all(r.status == "SKIPPED" for r in again))
+        back = dispatch(target, live=True, ledger=self.ledger)               # a returning site is a new case
+        self.assertEqual({r.action: r.status for r in back}["mock_registrar"], "SENT")
 
 
 if __name__ == "__main__":
