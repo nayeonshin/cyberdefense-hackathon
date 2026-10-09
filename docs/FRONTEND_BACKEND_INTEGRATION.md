@@ -62,11 +62,26 @@ unknown scan times, receipt matching, unsafe names/links and read-only UI reruns
 The integration CI job also starts a disposable ClickHouse instance and runs
 the native Member 1/2 roundtrip and new frontend adapter tests against it. The
 existing controlled pipeline, persistence, database recovery and worker-failure
-container checks remain enabled. Final results are recorded after CI finishes.
+container checks remain enabled.
+
+[Final CI run 38003354360](https://github.com/nayeonshin/cyberdefense-hackathon/actions/runs/38003354360)
+passed **152 tests / 10 skips** in the default suite and then **all 8 native
+ClickHouse roundtrip tests** with the opt-in database enabled. The combined
+controlled pipeline completed in **14.225 seconds**, retained one submitted
+receipt through persistent-volume restart and database outage/recovery, and
+exposed a forced worker exit. The offline Actor benchmark passed all **124
+scenarios**, score 100, with zero reported safety violations.
+
+Tested image:
+`ghcr.io/nayeonshin/cyberdefense-hackathon:50273c8a725a9bcbc36fc04b10377e8cb495551a`.
+Digest: `sha256:a7b31b86f648f2931061e5293562304e07d77a19c6f5112e87f1bcaa3ccb8486`.
+The final documentation commit only records these results; the code is the
+image commit above. Existing animation assets are unchanged from PR #2.
 
 No existing Akash lease is updated by this integration experiment. The tested
 integration image can be reviewed before a separate deployment decision.
-Guild AI is not used.
+Guild AI is not used. The backend's optional Guild scaffold is retained as
+inactive source only; it is not part of the Python runtime or claimed validation.
 
 ## Credential follow-up
 
