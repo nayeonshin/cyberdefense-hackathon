@@ -1,7 +1,19 @@
 # Three-minute recording and submission
 
-**Do not record the final sponsor demo from the simulated dashboard.** The integration test supplies
-verdicts and is engineering verification, not evidence of Semgrep or ClickHouse usage.
+**Do not record the final sponsor demo from the simulated dashboard.** Supplied-verdict unit tests are
+not sponsor execution evidence. The real controlled pipeline and its Linux CI verification execute
+Semgrep; the latest CI run also writes and queries a real ClickHouse container.
+
+## Current evidence (October 9)
+
+- Live: <https://j37o2jgnu9bq57cesbda28htdc.ingress.akash-palmito.org/>
+- Akash DSEQ `1791574764504`, provider Akash Palmito, sponsor credits only, 24-hour runtime limit.
+- Actual cloud Semgrep-to-Actor run: **12.238 seconds**, one mock-registrar submission, HTTP 410.
+- [42 tests and real ClickHouse container run](https://github.com/nayeonshin/cyberdefense-hackathon/actions/runs/37982475135):
+  **12.947 seconds**, persisted ledger, new worker and fresh check after restart, one submitted receipt.
+- The cloud dashboard currently uses file storage. Member 1's localhost database is not reachable from Akash.
+- Guild AI sponsor execution is not yet independently verified. No final recording or submission exists yet.
+- Team identity and submitter fields remain intentionally unfilled until the team supplies them.
 
 ## Recording script (180 seconds)
 
@@ -40,16 +52,19 @@ Takedown Orchestrator connects threat ingestion, payload inspection, action disp
 observable workflow. ClickHouse stores events and receipts; Member 2’s Semgrep integration supplies matched
 code evidence. A separate worker invokes Member 3’s dispatcher and rechecks the target without browser-driven
 action controls. Streamlit presents ingestion timing, scan results, and per-event action receipts. The container
-is designed for Akash with persistent dispatch history. Our demo uses a harmless team-owned target and a private
-mock registrar; it does not claim that an external provider performed a real-world takedown. Add the verified
-Akash deployment and Guild AI evaluation details before submitting, and remove any integration not completed.
+runs on Akash with persistent dispatch history. The cloud run completed in 12.238 seconds; a separate actual
+ClickHouse container run completed in 12.947 seconds and preserved one submission across restart. The cloud
+currently uses file storage while a reachable external ClickHouse endpoint is pending. Our demo uses a harmless
+team-owned target and a private mock registrar; it does not claim that an external provider performed a real-world
+takedown. Guild AI usage is not claimed without Member 2's execution evidence.
 
 **Repository:** <https://github.com/nayeonshin/cyberdefense-hackathon/tree/member4-shipper>
 
 ## Final checklist
 
-- [ ] Real Member 1 / Member 2 integrations and at least three sponsor tools verified.
-- [ ] Akash DSEQ, provider, public URL, image digest, and screenshot saved.
+- [x] Real Member 1 / Member 2 integrations; Semgrep, ClickHouse and Akash have working evidence across cloud and CI environments.
+- [x] Akash DSEQ, provider, public URL, image digest, and screenshot saved.
+- [ ] Reachable external ClickHouse configured for the final cloud recording.
 - [ ] Three-minute recording uploaded and accessible to judges without an unexpected sign-in.
 - [ ] Team member names/emails confirmed by team; exactly one submitter.
 - [ ] Each applicable sponsor prize selected separately according to the actual rules; confirm with Andy if unclear.
