@@ -1,0 +1,10 @@
+{
+  "event_id": "evt-controlled-1",
+  "target_url": "http://localhost:8099/site",
+  "timestamp": "2026-10-09T18:05:00Z",
+  "semgrep_detected": true,
+  "confidence_score": 0.99,
+  "evidence": "Semgrep rule `credential-stealer` matched the login form",
+  "corroborated": true,
+  "controlled": true
+}
