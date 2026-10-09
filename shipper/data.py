@@ -9,9 +9,10 @@ from .storage import read_json, read_jsonl
 
 
 def calculate_metrics(records, receipts):
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=1)
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(minutes=1)
     times = [parse_time(r["metadata"].get("ingested_at")) for r in records]
-    return {"ingested_per_minute": sum(t is not None and t >= cutoff for t in times),
+    return {"ingested_per_minute": sum(t is not None and cutoff <= t <= now for t in times),
             "total_events": len(records),
             "pending_scans": sum(not r["metadata"].get("scan_completed_at") for r in records),
             "detected": sum(r["event"]["semgrep_detected"] and bool(r["metadata"].get("scan_completed_at")) for r in records),
@@ -106,7 +107,7 @@ class ClickHouseSource:
 
     def get_metrics(self):
         values = self._query(f"SELECT count() AS total_events, "
-            "countIf(ingested_at >= now() - INTERVAL 1 MINUTE) AS ingested_per_minute, "
+            "countIf(ingested_at >= now64(3) - INTERVAL 1 MINUTE AND ingested_at <= now64(3)) AS ingested_per_minute, "
             "countIf(scan_completed_at IS NULL) AS pending_scans, "
             "countIf(semgrep_detected AND scan_completed_at IS NOT NULL) AS detected "
             f"FROM {self.table} WHERE run_id = {{run:String}}", {"run": self.settings.run_id})[0]

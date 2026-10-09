@@ -69,6 +69,16 @@ def test_future_heartbeat_is_stale(tmp_path, monkeypatch):
     assert any("stale" in item.value for item in app.warning)
 
 
+def test_future_ingestion_does_not_inflate_current_throughput(tmp_path):
+    from shipper.data import calculate_metrics
+    from tests.test_shipper import config, record
+    recent, future = record(config(tmp_path)), record(config(tmp_path))
+    future["metadata"]["ingested_at"] = "2099-01-01T00:00:00Z"
+    metrics = calculate_metrics([recent, future], [])
+    assert metrics["total_events"] == 2
+    assert metrics["ingested_per_minute"] == 1
+
+
 def test_crash_after_receipt_before_recheck_state_recovers(tmp_path, monkeypatch):
     from shipper.controlled import start_registrar
     from shipper.data import FileSource
