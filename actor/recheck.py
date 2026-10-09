@@ -72,7 +72,8 @@ def recheck_once(ledger: Ledger = None, policy: dict = None, live: bool = False)
             ledger.append(still_up)
             receipts.append(still_up)
             receipts += run_plans(verdict, enrichment, decision.plans, live, ledger, policy)
-    ledger.save_state(state)
+    if live:        # a dry run only reports; what the live loop remembers stays as it is
+        ledger.save_state(state)
     return receipts
 
 

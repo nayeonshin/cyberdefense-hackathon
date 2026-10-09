@@ -29,7 +29,8 @@ from .recheck import recheck_once
 TRUSTED_FEEDS = {"urlhaus", "openphish", "threatfox"}
 THREAT_TYPES = {"malware_download": "malware"}
 MAX_BATCH = 25                     # the brain's /scan/batch limit
-VERIFIED_BATCH = 200               # verdicts handled per pass: one read, one write each way
+VERIFIED_BATCH = 200               # verdicts read per pass
+OUTCOME_BATCH = 20                 # outcomes written together, so a long pass shows up as it goes
 
 VERDICTS_DDL = """
 CREATE TABLE IF NOT EXISTS verdicts (
@@ -126,6 +127,8 @@ def _version(row: dict, status: str, proof_url: str) -> list:
     when = row.get("event_time")
     if not isinstance(when, datetime):
         when = datetime.now(timezone.utc)
+    elif when.tzinfo is None:       # read as naive UTC; without a zone it would be written as local time
+        when = when.replace(tzinfo=timezone.utc)
     return [str(row["event_id"]), str(row["target_url"]), when,
             bool(row.get("semgrep_detected")), row.get("confidence_score"), str(row.get("evidence") or ""),
             status, proof_url]
@@ -142,7 +145,10 @@ def run_verified(client, live: bool = False, ledger: Ledger = None, policy: dict
     ledger = ledger or Ledger()
     policy = policy or policy_module.load()
     receipts, outcomes = [], []
-    rows = [r for r in fetch_verified(client) if skip is None or str(r["event_id"]) not in skip]
+    if config.kill_switch():        # a pause must not use the queue up
+        return receipts
+    rows = [r for r in fetch_verified(client, VERIFIED_BATCH + len(skip or ()))
+            if skip is None or str(r["event_id"]) not in skip][:VERIFIED_BATCH]
     history.prime([history._host(str(r["target_url"])) for r in rows])
     try:
         with ledger.batch():
@@ -157,11 +163,43 @@ def run_verified(client, live: bool = False, ledger: Ledger = None, policy: dict
                 public = [r.proof_url for r in done
                           if r.proof_url.startswith("http") and "localhost" not in r.proof_url]
                 proof = (public or [r.proof_url for r in done if r.proof_url] or [""])[0]
+                if not done and any(r.detail.startswith("already done") for r in mine):
+                    done, proof = True, _earlier_proof(ledger, mine[0].domain)
                 outcomes.append(_version(row, "PUBLISHED_TAKEDOWN" if done else "WITHHELD", proof))
+                if len(outcomes) >= OUTCOME_BATCH:
+                    client.insert(verdicts_table(), outcomes, column_names=EVENT_COLUMNS)
+                    outcomes = []
     finally:        # what was handled is written back even when a later row stops the pass
         if outcomes:
             client.insert(verdicts_table(), outcomes, column_names=EVENT_COLUMNS)
     return receipts
+
+
+def _earlier_proof(ledger: Ledger, domain: str) -> str:
+    """The proof link of what already went out for a host: its second URL points to the same case."""
+    links = [r["proof_url"] for r in ledger.all()
+             if r["domain"] == domain and r["status"] in DONE_STATUSES and not r["dry_run"]
+             and r["proof_url"]]
+    public = [link for link in links if link.startswith("http") and "localhost" not in link]
+    return (public or links or [""])[0]
+
+
+def _score(value):
+    """A Float32 column returns 0.95 as 0.94999998, just under the threshold it was meant to meet."""
+    if isinstance(value, float):
+        return round(value, 4)
+    return value
+
+
+def _retry(write, tries: int = 4):
+    """A write that must not be lost to one dropped connection."""
+    for attempt in range(tries):
+        try:
+            return write()
+        except Exception:
+            if attempt == tries - 1:
+                raise
+            time.sleep(2 * (attempt + 1))
 
 
 def _act(row: dict, live: bool, ledger: Ledger, policy: dict) -> list:
@@ -173,7 +211,7 @@ def _act(row: dict, live: bool, ledger: Ledger, policy: dict) -> list:
             "event_id": event_id, "target_url": row["target_url"],
             "timestamp": str(row.get("event_time") or ""),
             "semgrep_detected": row.get("semgrep_detected") is True or row.get("semgrep_detected") == 1,
-            "confidence_score": row.get("confidence_score"),
+            "confidence_score": _score(row.get("confidence_score")),
             "evidence": row.get("evidence") or "",
             "threat_type": THREAT_TYPES.get(threat, threat),
             "corroborated": str(row.get("feed_source") or "").lower() in TRUSTED_FEEDS,
@@ -295,7 +333,7 @@ def follow_up(client, live: bool = False, ledger: Ledger = None, policy: dict = 
     receipts = recheck_once(ledger, policy, live=live)
     confirmed = [r for r in receipts if r.status == "CONFIRMED_DOWN"]
     if live:
-        set_status(client, "TAKEN_DOWN", [r.event_id for r in confirmed])
+        _retry(lambda: set_status(client, "TAKEN_DOWN", [r.event_id for r in confirmed]))
         if verdict_rows:
             for r in confirmed:
                 current = list(client.query(
@@ -305,7 +343,7 @@ def follow_up(client, live: bool = False, ledger: Ledger = None, policy: dict = 
                 row = current[0] if current and current[0].get("event_id") == r.event_id else {
                     "event_id": r.event_id, "target_url": r.target_url, "semgrep_detected": True,
                     "evidence": r.detail}
-                write_back(client, row, "TAKEN_DOWN", row.get("proof_url") or "")
+                _retry(lambda: write_back(client, row, "TAKEN_DOWN", row.get("proof_url") or ""))
     return receipts
 
 
@@ -332,14 +370,20 @@ def main() -> None:
     while True:
         own_scan = args.scan or bool(args.rows)
         step = run_once if own_scan else run_verified
-        receipts = step(client, args.live, ledger, policy, skip=None if args.live else seen)
-        while receipts and args.live and not own_scan:      # a backlog is worked off in one go
-            more = step(client, args.live, ledger, policy)
-            if not more:
-                break
-            receipts += more
-        receipts += follow_up(client, args.live, ledger, policy, verdict_rows=not own_scan)
-        print_receipts(receipts) if receipts else print("nothing pending")
+        try:
+            receipts = step(client, args.live, ledger, policy, skip=None if args.live else seen)
+            while receipts and args.live and not own_scan:      # a backlog is worked off in one go
+                more = step(client, args.live, ledger, policy)
+                if not more:
+                    break
+                receipts += more
+            receipts += follow_up(client, args.live, ledger, policy, verdict_rows=not own_scan)
+            print_receipts(receipts) if receipts else print("nothing pending")
+        except Exception as exc:    # one failed pass must not end the loop
+            if not args.loop:
+                raise
+            print(f"[intake] pass failed, trying again: {type(exc).__name__}: {str(exc)[:200]}",
+                  file=sys.stderr)
         if args.rows:
             for row in client.rows:
                 print(f"  row {row['event_id']}: {row['takedown_status']}")

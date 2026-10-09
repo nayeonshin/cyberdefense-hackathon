@@ -2,7 +2,7 @@
 
 ![Actor bench scorecard](bench/scorecard.svg)
 
-The card above is rewritten by `python -m actor.bench`: 119 labelled scenarios run through the
+The card above is rewritten by `python -m actor.bench`: 123 labelled scenarios run through the
 real dispatcher with every outside channel replaced by a recorder. One safety violation makes
 a run UNSAFE whatever its score. Details are in [bench/scenarios.yaml](bench/scenarios.yaml)
 and `bench/scorecard.html`.
@@ -74,6 +74,12 @@ asks ClickHouse what is already on record for the host, and the answer is used t
 
 The lookup runs on the table's sort key: 66 ms median from a laptop over 822,439 rows.
 
+`python -m actor.insights` prints what the Actor reads from ClickHouse in about three
+seconds: table sizes, the lookup on the real and on the billion-row table side by side, how
+concentrated the threat is (8.0 % of 444,138 hosts carry 42.9 % of all URLs, and on those
+hosts the history alone is the second source), the top repeat offenders, the shared
+platforms it must not block, and what it would do with every real URL.
+
 ## Stress test on the database
 
 The bench uses a stand-in table. `python -m actor.stress` runs the same code against the
@@ -125,6 +131,13 @@ The first pass over that page found a gap the counts had missed. A second bad pa
 same shared platform host, for example another file on `raw.githubusercontent.com`, was
 skipped as already handled, because finished work was tracked per host. On shared platforms
 it is now tracked per URL (scenarios `platform-second-url` and `platform-same-url-again`).
+A left click on a URL opens the urlscan.io record of its host; the page itself is never
+opened from the review.
+
+A code review of the batching found four more faults, each now a scenario: a confidence of
+0.95 came back from the Float32 column as 0.94999998 and missed the mail threshold, the
+kill switch wrote the waiting queue off as withheld, a second URL on a handled host was
+recorded as withheld, and every write-back moved the event time by the local UTC offset.
 
 ## Live checks
 

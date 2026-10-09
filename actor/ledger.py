@@ -142,7 +142,7 @@ class Ledger:
         """Receipts since this domain was last confirmed down: a returning site is a new case."""
         rows, start = self.all(), 0
         for i, r in enumerate(rows):
-            if r["domain"] == domain and r["status"] == "CONFIRMED_DOWN":
+            if r["domain"] == domain and r["status"] == "CONFIRMED_DOWN" and not r["dry_run"]:
                 start = i + 1
         return rows[start:]
 
@@ -156,7 +156,7 @@ class Ledger:
         """The same for one URL. On a shared platform every page is a case of its own."""
         rows, start = self.all(), 0
         for i, r in enumerate(rows):
-            if r["target_url"] == url and r["status"] == "CONFIRMED_DOWN":
+            if r["target_url"] == url and r["status"] == "CONFIRMED_DOWN" and not r["dry_run"]:
                 start = i + 1
         return frozenset(r["action"] for r in rows[start:]
                          if r["target_url"] == url and r["status"] in DONE_STATUSES

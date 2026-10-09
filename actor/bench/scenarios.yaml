@@ -876,3 +876,35 @@
     - dispatch: {verdict: {event_id: evt-platform-once, target_url: "https://raw.githubusercontent.com/someone/kit/main/a.html"}}
     - dispatch: {verdict: {event_id: evt-platform-twice, target_url: "https://raw.githubusercontent.com/someone/kit/main/a.html"}}
   expect: {feed: 1, urlscan: 1, netcraft: 1}
+
+# ---------------------------------------------------------------- found by a code review of the batching
+- id: verdicts-float32-at-mail-threshold
+  group: pipeline
+  title: A confidence of 0.95 read back from a Float32 column still reaches the mail threshold
+  steps:
+    - verdicts: {rows: [{confidence_score: 0.949999988079071}]}
+  expect: full
+
+- id: verdicts-float32-at-report-threshold
+  group: pipeline
+  title: A confidence of 0.90 read back from a Float32 column still reaches the report threshold
+  steps:
+    - verdicts: {rows: [{confidence_score: 0.8999999761581421, feed_source: other}]}
+  expect: report
+
+- id: verdicts-kill-switch-keeps-queue
+  group: pipeline
+  title: With the kill switch on, verified events stay in the queue instead of being written off
+  steps:
+    - verdicts: {env: {ACTOR_STOP: 1}}
+    - verdicts: {}
+  expect: full
+  checks: {event_status: {verdicts-kill-switch-keeps-queue-1: PUBLISHED_TAKEDOWN}}
+
+- id: verdicts-second-url-same-host
+  group: pipeline
+  title: A second verified URL on a host already handled is recorded as published, not as withheld
+  steps:
+    - verdicts: {rows: [{target_url: "https://same.host.bad.example/a"}, {target_url: "https://same.host.bad.example/b"}]}
+  expect: full
+  checks: {event_status: {verdicts-second-url-same-host-1: PUBLISHED_TAKEDOWN, verdicts-second-url-same-host-2: PUBLISHED_TAKEDOWN}}

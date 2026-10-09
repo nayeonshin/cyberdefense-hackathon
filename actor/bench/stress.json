@@ -1,18 +1,18 @@
 {
   "pipeline": {
-    "ran_at": "2026-10-09T21:32:39Z",
+    "ran_at": "2026-10-09T21:41:59Z",
     "events": 423,
     "handled": 364,
     "passes": 2,
-    "seconds": 24.3,
-    "events_per_second": 14.96,
+    "seconds": 26.5,
+    "events_per_second": 13.73,
     "receipts": 1467,
     "receipts_in_clickhouse": 1467,
     "requests_recorded": 669,
     "mails_recorded": 94,
     "outcomes": {
-      "PUBLISHED_TAKEDOWN": 304,
-      "WITHHELD": 60
+      "PUBLISHED_TAKEDOWN": 308,
+      "WITHHELD": 56
     },
     "problems": [],
     "problem_count": 0
