@@ -1,0 +1,2 @@
+# Optional graph export only; no change to scanner runtime dependencies.
+matplotlib>=3.8

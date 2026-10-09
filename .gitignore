@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 captures/
 .env
+clickhouse.env
 node_modules/
 dist/
 guild.json

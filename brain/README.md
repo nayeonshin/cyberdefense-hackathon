@@ -8,6 +8,81 @@ Takes an event in the team's shared contract, fetches what the URL serves, scans
 
 All other fields pass through unchanged.
 
+## Member 1 integration
+
+The ingestion implementation from `feature/clickhouse-ingest` is included at
+commit `2b6aafe`. Its public API and domain summaries are described in
+[INTERFACE.md](../INTERFACE.md). Use one app environment for both parts:
+
+```sh
+python -m pip install -r requirements.txt
+# Fill in the gitignored clickhouse.env using clickhouse.env.example.
+python -m brain.worker --once
+python -m brain.worker --limit 25 --interval 10
+```
+
+The worker reads up to 25 full URL events, calls the existing batch scanner,
+and appends the eight shared-contract fields to `events`. Member 1's
+`incoming_threats` keeps feed metadata; the worker marks only the scanned
+**event ID** as `SCANNED`, using Member 1's synchronous update API. It does not
+mark an entire domain complete after scanning one page. The separate events
+table retains VERIFIED, REJECTED or FETCH_FAILED for Member 3 to consume with
+`SELECT * FROM events FINAL WHERE action_status = 'VERIFIED'`.
+
+`brain/clickhouse.py` is the per-event adapter because domain summaries do not
+include event IDs and their URL list is capped at ten. Its pending query excludes
+already persisted verdicts, so partial writes resume from unwritten events.
+An interrupted raw-status mutation is reconciled on the next poll. Run one
+worker per database; parallel workers require an external claim/lease mechanism.
+The ingest poller should also have only one writer per database.
+
+`CLICKHOUSE_DATABASE` selects the database namespace. `THREATS_TABLE` and
+`EVENTS_TABLE` select validated table names for isolated development/tests;
+their defaults are `incoming_threats` and `events`. URLhaus/OpenPhish feed rows
+set the independent-feed flag; synthetic demo rows use `feed_source: demo` and
+receive no feed confidence bonus.
+
+### Refined integration tests and graphs
+
+The ordinary suite runs without ClickHouse and skips database tests. To opt in,
+point the connection variables at a **local test server**, set
+`RUN_CLICKHOUSE_TESTS=1`, and run `python -m pytest tests -q`. Database roundtrip
+tests use unique databases; Member 1's smoke test uses a unique table and
+restores `THREATS_TABLE`. No real malicious URL or live feed is fetched.
+
+Coverage includes the updated filters and domain rules, repeated IDs, timestamp
+preservation, newest-first domain URL summaries, the ten-URL summary cap,
+all three scanner verdicts, per-event write-back, empty queues, malformed scan
+responses and recovery after interrupted writes. Graph tests verify hourly
+distinct URL counts, distinct event counts by threat type and current verdict
+counts after event version replacement.
+
+```sh
+python -m brain.telemetry --output graph-data.json
+# Optional SVG/PNG/PDF export; Matplotlib is separate from runtime requirements.
+python -m pip install -r requirements-plots.txt
+python -m brain.telemetry --output graph-data.json --plot graph-summary.svg
+```
+
+The JSON contains `domain_activity`, `threat_types` and `scanner_verdicts` for a
+dashboard to consume. Activity buckets use the feed's report timestamp in UTC,
+not ingestion time. Verdicts count current scanner-stage events from `events
+FINAL`; events advanced to an Actor status are excluded. Pending/unscanned feed
+rows are not classified as rejected. The plot shows the ten busiest domains;
+JSON retains every domain. Pass `INTEGRATION_GRAPH_OUTPUT=artifacts/member1-integration`
+to the opt-in tests to export JSON/SVG/PNG from the three owned demo fixtures.
+
+The local database was tested with ClickHouse 26.9.14.10. Shared ClickHouse Cloud
+credentials and live URLhaus polling are not verified by these synthetic tests.
+
+Validation on 2026-10-09: the full suite with the local database enabled finished
+`33 passed, 1 warning in 310.06s`. The focused integration suite without a
+database finished `12 passed, 5 skipped in 0.40s`. The warning is the existing
+Starlette/httpx deprecation. The generated [SVG](../artifacts/member1-integration.svg),
+[PNG](../artifacts/member1-integration.png) and [JSON](../artifacts/member1-integration.json)
+show the synthetic fixture: two hourly buckets with 1 and 2 URLs, threat counts
+of 2 phishing and 1 malware-download reports, and one of each scanner verdict.
+
 ## Setup
 
 Install Semgrep in its own environment: it pins dependency versions that conflict with FastAPI's.
