@@ -11,8 +11,8 @@ All other fields pass through unchanged.
 ## Member 1 integration
 
 The ingestion implementation from `feature/clickhouse-ingest` is included at
-commit `1f80f6f`, including the OpenPhish/ThreatFox adapters, autonomous daemon,
-and run telemetry. Its public API and domain summaries are described in
+commit `80b4186`, including the OpenPhish/ThreatFox adapters, autonomous daemon,
+run telemetry, and capacity benchmark. Its public API and domain summaries are described in
 [INTERFACE.md](../INTERFACE.md). Use one app environment for both parts:
 
 ```sh
@@ -121,7 +121,49 @@ An added opt-in database test checks OpenPhish/ThreatFox repeat polling,
 write-back, overlapping URL counts and `c2` graph categories. The database
 rerun could not be completed: the temporary ClickHouse container exited,
 and the environment's approval review blocked restarting it. Live feeds
-were not contacted.
+were not contacted. See the capacity update below for the subsequent database rerun.
+
+### Capacity and live-feed throughput update
+
+`drop_duplicates()` now looks up at most 2,000 IDs per query, allowing large
+polls to pass through the existing deduplication and bulk-insert path. The
+scanner worker still processes batches of at most 25; ingestion capacity
+does not imply the same scanning rate.
+
+```sh
+python ingest.py --bench --rows 100000 --batch 10000
+python tests/volume_test.py --rows 100000 --batch 10000
+python threatfeed.py --stats
+```
+
+The benchmark requires ClickHouse but no feed access or Auth-Key. It uses a
+unique `incoming_threats_bench_<uuid>` table, refuses existing/configured live
+tables, and drops its own table unless `--keep`. Synthetic URLs use `.invalid`
+domains or `198.51.100.0/24` addresses. It writes no `ingest_runs` telemetry.
+Capacity measures deduplication and insertion, plus domain-query latency;
+it does not run HTTP fetching, Semgrep, Guild or takedown actions.
+
+`get_feed_stats()["throughput"]` reports fetched records per busy second and
+new rows per wall-clock hour, excluding the first run's backlog. The hourly
+rate stays null until a feed spans ten minutes of recorded runs. These live
+statistics are separate from synthetic capacity and the three scanner graphs.
+Volume tests have unique tables and require `RUN_VOLUME_TESTS=1` under pytest;
+ordinary pytest collection never changes table settings or runs a benchmark.
+
+The demo command `python ingest.py --bench --rows 100000 --batch 50000` was
+verified locally against ClickHouse 26.9.14.10 on 2026-10-09. It inserted
+100,000 synthetic rows in two batches at 74,396 rows/s through deduplication
+and insertion (179,265 rows/s insert-only). Domain-query p50 was 69 ms; the
+50,000-row redelivery added no rows. All four integrity checks passed and the
+unique benchmark table was dropped. These timings describe this local Windows /
+WSL test setup, not scanner throughput or a guaranteed deployment rate.
+
+The full suite with `RUN_CLICKHOUSE_TESTS=1` and `RUN_VOLUME_TESTS=1` finished
+`71 passed, 1 warning in 318.51s`. This includes scanner/demo HTTP behavior,
+new-feed write-back, graph counts, database smoke checks, the 100,000-row
+capacity floor, and 25,000-ID deduplication. The warning is the existing
+Starlette/httpx deprecation. All 32 ingestion self-checks also passed.
+Shared ClickHouse Cloud and real feed traffic remain untested here.
 
 ## Setup
 
